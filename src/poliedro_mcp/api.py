@@ -1,18 +1,38 @@
 from __future__ import annotations
 
 import os
+import secrets
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 
-from .api_auth import verify_api_key
 from .logger import logger
 from .services import PoliedroService
 
 API_PREFIX = "/api/v1"
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def _get_required_api_key() -> str:
+    api_key = os.getenv("API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "API_KEY não configurada. Defina a variável de ambiente no Render."
+        )
+    return api_key
+
+
+def verify_api_key(api_key_header: str | None = Security(_api_key_header)) -> None:
+    expected = _get_required_api_key()
+    if not api_key_header or not secrets.compare_digest(api_key_header, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key inválida ou ausente.",
+        )
 
 
 def _service() -> PoliedroService:
