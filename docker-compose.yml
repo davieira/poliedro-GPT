@@ -1,0 +1,11 @@
+services:
+  poliedro-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - API_KEY=dev-local-key
+      - POLIEDRO_CONFIG=/app/config/config.json
+      # - POLIEDRO_TOKEN=eyJ...
+    volumes:
+      - ./config/config.json:/app/config/config.json:ro

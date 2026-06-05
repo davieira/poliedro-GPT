@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: poliedro-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && pip install -e .
+    startCommand: uvicorn poliedro_mcp.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: API_KEY
+        generateValue: true
+      - key: POLIEDRO_TOKEN
+        sync: false
+      - key: POLIEDRO_CONFIG_JSON
+        sync: false

@@ -1,0 +1,26 @@
+{
+  "base_url": "https://poliedro-api.p4ed.com",
+  "auth": {
+    "username": "SEU_USUARIO_PMAIS"
+  },
+  "student": {
+    "school_id": null,
+    "school_year": null,
+    "origin_id": null,
+    "enrollment_id": null,
+    "email_p4ed": null,
+    "role_id": null
+  },
+  "calendar": {
+    "owner_id": null,
+    "role_pmais_id": null,
+    "time_zone": "America/Sao_Paulo",
+    "is_widget": false
+  },
+  "notifications": {
+    "page": 1,
+    "limit": 50,
+    "notification_type": "JUST_IN_APP",
+    "status": "UNREAD"
+  }
+}

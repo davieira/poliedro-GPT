@@ -1,0 +1,25 @@
+[project]
+name = "poliedro-mcp"
+version = "0.2.0"
+description = "API REST e MCP server para o portal Poliedro/P+"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32.0",
+    "keyring>=25.0.0",
+    "mcp>=1.9.0",
+    "python-dateutil>=2.9.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[project.scripts]
+poliedro-api = "poliedro_mcp.api:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "poliedro": {
+      "command": "/absolute/path/to/poliedro-mcp/.venv/bin/python",
+      "args": [
+        "-m",
+        "poliedro_mcp.server"
+      ],
+      "cwd": "/absolute/path/to/poliedro-mcp"
+    }
+  }
+}
