@@ -21,10 +21,11 @@ Este guia conecta um **Custom GPT** à API hospedada no Render.
 5. Em **Schema**, escolha **Import from URL** e informe:
 
 ```
-https://SEU-APP.onrender.com/openapi.json
+https://poliedro-api.onrender.com/openapi.json
 ```
 
-Substitua `SEU-APP` pelo nome do serviço no Render.
+O schema inclui `servers` com a URL base (necessário para o ChatGPT).
+Se o deploy usar outro domínio, defina `API_BASE_URL` no Render.
 
 6. Salve o GPT
 

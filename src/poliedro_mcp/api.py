@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -46,14 +47,25 @@ def _handle_service_error(exc: Exception) -> JSONResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"error": str(exc)},
         )
-    if isinstance(exc, RuntimeError):
+    if isinstance(exc, json.JSONDecodeError):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": (
+                    "POLIEDRO_CONFIG_JSON inválido. "
+                    "Cole o JSON em uma única linha, sem aspas extras."
+                ),
+                "detail": str(exc),
+            },
+        )
+    if isinstance(exc, (RuntimeError, KeyError)):
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content={"error": str(exc)},
         )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"error": "Erro interno ao consultar o Poliedro."},
+        content={"error": "Erro interno ao consultar o Poliedro.", "detail": str(exc)},
     )
 
 
@@ -78,6 +90,14 @@ app = FastAPI(
 )
 
 
+def _api_base_url() -> str:
+    for key in ("API_BASE_URL", "RENDER_EXTERNAL_URL"):
+        url = os.getenv(key, "").strip().rstrip("/")
+        if url:
+            return url
+    return "https://poliedro-api.onrender.com"
+
+
 def custom_openapi() -> dict[str, Any]:
     if app.openapi_schema:
         return app.openapi_schema
@@ -90,6 +110,7 @@ def custom_openapi() -> dict[str, Any]:
         description=app.description,
         routes=app.routes,
     )
+    schema["servers"] = [{"url": _api_base_url()}]
     schema.setdefault("components", {}).setdefault("securitySchemes", {})[
         "ApiKeyAuth"
     ] = {
