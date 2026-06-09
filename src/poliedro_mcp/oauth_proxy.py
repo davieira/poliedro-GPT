@@ -193,9 +193,7 @@ def _login_html(
     </form>
   </main>
   <footer>
-    Projeto open source não oficial —
-    <a href="{html.escape(GITHUB_REPO_URL)}" target="_blank" rel="noopener noreferrer">poliedro-GPT no GitHub</a>
-  </footer>
+    Projeto open source não oficial </footer>
 </body>
 </html>"""
 
