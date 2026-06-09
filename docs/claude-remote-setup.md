@@ -61,6 +61,14 @@ Igual ao ChatGPT OAuth:
 
 ## Troubleshooting
 
+**"Couldn't register with … sign-in service"**
+
+O Claude descobre OAuth em `/.well-known/oauth-authorization-server/mcp` (não em `/mcp/.well-known/...`). Confirme que responde com `registration_endpoint`:
+
+```bash
+curl -s https://SEU-APP.onrender.com/.well-known/oauth-authorization-server/mcp
+```
+
 **Conector não conecta**
 
 - Confirme que a API responde: `curl https://SEU-APP.onrender.com/health`

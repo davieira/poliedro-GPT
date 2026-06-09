@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Atalho na raiz do repo. Uso: python print_oauth_config.py [URL_DA_API]"""
+"""Atalho na raiz do repo. Uso: python print_oauth_config.py [URL_DA_API]
+
+Exibe duas seções: ChatGPT Actions (OAuth manual) e Claude MCP remoto (connector URL).
+"""
 
 from __future__ import annotations
 
