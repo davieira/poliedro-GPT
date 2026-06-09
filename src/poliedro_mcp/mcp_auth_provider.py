@@ -20,13 +20,22 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyUrl
 
 from .api_base import api_base_url
+from .logger import logger
 from .mcp_oauth_tokens import (
     AUTH_CODE_TTL,
+    MAX_AUTH_CODE_URL_LEN,
+    extract_poliedro_access_token,
+    mint_auth_code_token,
     mint_client_id,
     mint_pending_token,
+    mint_session_access_token,
     verify_payload,
 )
-from .logger import logger
+
+CLAUDE_REDIRECT_URIS = (
+    "https://claude.ai/api/mcp/auth_callback",
+    "https://claude.com/api/mcp/auth_callback",
+)
 from .profile_discovery import decode_jwt_claims
 
 ACCESS_TOKEN_TTL = 3600
@@ -57,6 +66,13 @@ class PoliedroMcpAuthProvider(
         self._refresh: dict[str, tuple[RefreshToken, str | None]] = {}
         self._access: dict[str, AccessToken] = {}
         self._codes: dict[str, tuple[float, _CodePayload]] = {}
+        self._used_code_jtis: dict[str, float] = {}
+
+    def _purge_used_jtis(self) -> None:
+        now = time.time()
+        expired = [key for key, seen_at in self._used_code_jtis.items() if now - seen_at > AUTH_CODE_TTL]
+        for key in expired:
+            self._used_code_jtis.pop(key, None)
 
     def _purge_expired_codes(self) -> None:
         now = time.time()
@@ -92,16 +108,133 @@ class PoliedroMcpAuthProvider(
         except Exception:
             return None
 
+    def _build_code_payload(
+        self,
+        *,
+        code: str,
+        client: OAuthClientInformationFull,
+        params: AuthorizationParams,
+        poliedro_access_token: str,
+        poliedro_refresh_token: str | None,
+        expires_in: int,
+        expires_at: float,
+    ) -> _CodePayload:
+        auth_code = AuthorizationCode(
+            code=code,
+            scopes=params.scopes or DEFAULT_SCOPES,
+            expires_at=expires_at,
+            client_id=client.client_id or "",
+            code_challenge=params.code_challenge,
+            redirect_uri=params.redirect_uri,
+            redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
+            resource=params.resource,
+        )
+        return _CodePayload(
+            code=auth_code,
+            poliedro_access_token=poliedro_access_token,
+            poliedro_refresh_token=poliedro_refresh_token,
+            expires_in=expires_in,
+        )
+
     def _load_code_payload(self, authorization_code: str) -> _CodePayload | None:
         self._purge_expired_codes()
         entry = self._codes.get(authorization_code)
-        if entry is None:
+        if entry is not None:
+            created_at, payload = entry
+            if time.time() - created_at > AUTH_CODE_TTL:
+                self._codes.pop(authorization_code, None)
+                return None
+            return payload
+
+        try:
+            data = verify_payload(authorization_code, "mcp_code")
+        except Exception:
             return None
-        created_at, payload = entry
-        if time.time() - created_at > AUTH_CODE_TTL:
-            self._codes.pop(authorization_code, None)
+
+        jti = str(data.get("jti") or "")
+        if not jti:
             return None
-        return payload
+        self._purge_used_jtis()
+        if jti in self._used_code_jtis:
+            return None
+
+        client = self._restore_client(str(data.get("client_id") or ""))
+        if client is None:
+            return None
+
+        params = AuthorizationParams(
+            state=None,
+            scopes=data.get("scopes") or DEFAULT_SCOPES,
+            code_challenge=data["code_challenge"],
+            redirect_uri=AnyUrl(data["redirect_uri"]),
+            redirect_uri_provided_explicitly=bool(data.get("redirect_uri_provided_explicitly")),
+            resource=data.get("resource"),
+        )
+        return self._build_code_payload(
+            code=authorization_code,
+            client=client,
+            params=params,
+            poliedro_access_token=str(data.get("poliedro_access_token") or ""),
+            poliedro_refresh_token=data.get("poliedro_refresh_token"),
+            expires_in=int(data.get("expires_in") or ACCESS_TOKEN_TTL),
+            expires_at=float(data.get("exp") or time.time()),
+        )
+
+    def _resolve_poliedro_access_token(self, payload: _CodePayload) -> str:
+        if payload.poliedro_access_token:
+            return payload.poliedro_access_token
+
+        if payload.poliedro_refresh_token:
+            from .auth import LoginError, refresh_access_token
+            from .user_context import get_base_config
+
+            try:
+                tokens = refresh_access_token(
+                    get_base_config()["base_url"],
+                    payload.poliedro_refresh_token,
+                )
+                return str(tokens["access_token"])
+            except LoginError as exc:
+                raise TokenError("invalid_grant", str(exc)) from exc
+
+        raise TokenError("invalid_grant", "token do Poliedro indisponível")
+
+    def _issue_oauth_token(
+        self,
+        client: OAuthClientInformationFull,
+        payload: _CodePayload,
+        scopes: list[str],
+    ) -> OAuthToken:
+        poliedro_access = self._resolve_poliedro_access_token(payload)
+        expires_in = payload.expires_in
+        session_access = mint_session_access_token(poliedro_access, expires_in=expires_in)
+
+        self._access[session_access] = AccessToken(
+            token=poliedro_access,
+            client_id=client.client_id or "",
+            scopes=scopes,
+            expires_at=int(time.time()) + expires_in,
+        )
+
+        refresh_key: str | None = None
+        if payload.poliedro_refresh_token:
+            refresh_key = secrets.token_urlsafe(32)
+            self._refresh[refresh_key] = (
+                RefreshToken(
+                    token=refresh_key,
+                    client_id=client.client_id or "",
+                    scopes=scopes,
+                ),
+                payload.poliedro_refresh_token,
+            )
+
+        return OAuthToken(
+            access_token=session_access,
+            token_type="Bearer",
+            expires_in=expires_in,
+            refresh_token=refresh_key,
+            scope=" ".join(scopes),
+        )
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         return self._restore_client(client_id)
@@ -112,6 +245,10 @@ class PoliedroMcpAuthProvider(
 
         if client_info.scope is None:
             client_info.scope = " ".join(DEFAULT_SCOPES)
+
+        redirect_uris = {str(uri) for uri in (client_info.redirect_uris or [])}
+        redirect_uris.update(CLAUDE_REDIRECT_URIS)
+        client_info.redirect_uris = [AnyUrl(uri) for uri in sorted(redirect_uris)]
 
         stateless_id = mint_client_id(self._client_to_dict(client_info))
         client_info.client_id = stateless_id
@@ -162,32 +299,29 @@ class PoliedroMcpAuthProvider(
         now = time.time()
 
         code_str = secrets.token_urlsafe(32)
-        auth_code = AuthorizationCode(
+        code_payload = self._build_code_payload(
             code=code_str,
-            scopes=params.scopes or DEFAULT_SCOPES,
+            client=client,
+            params=params,
+            poliedro_access_token=poliedro_access_token,
+            poliedro_refresh_token=poliedro_refresh_token,
+            expires_in=expires_in,
             expires_at=now + AUTH_CODE_TTL,
-            client_id=client.client_id or "",
-            code_challenge=params.code_challenge,
-            redirect_uri=params.redirect_uri,
-            redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
-            resource=params.resource,
         )
-        self._codes[code_str] = (
-            now,
-            _CodePayload(
-                code=auth_code,
-                poliedro_access_token=poliedro_access_token,
-                poliedro_refresh_token=poliedro_refresh_token,
-                expires_in=expires_in,
-            ),
-        )
-        logger.info("MCP OAuth: authorization code emitido (%d chars)", len(code_str))
+        self._codes[code_str] = (now, code_payload)
 
-        return construct_redirect_uri(
+        redirect_url = construct_redirect_uri(
             str(params.redirect_uri),
             code=code_str,
             state=params.state,
         )
+        logger.info(
+            "MCP OAuth: login OK, redirect %d chars (code %d chars)",
+            len(redirect_url),
+            len(code_str),
+        )
+
+        return redirect_url
 
     async def load_authorization_code(
         self,
@@ -208,40 +342,28 @@ class PoliedroMcpAuthProvider(
         client: OAuthClientInformationFull,
         authorization_code: AuthorizationCode,
     ) -> OAuthToken:
-        payload = self._codes.pop(authorization_code.code, None)
-        if payload is None:
-            raise TokenError("invalid_grant", "authorization code inválido")
-        _, payload = payload
+        memory_entry = self._codes.pop(authorization_code.code, None)
+        if memory_entry is None:
+            logger.warning("MCP OAuth: code não encontrado (expirou ou outra instância)")
+            raise TokenError("invalid_grant", "authorization code inválido ou expirado")
+        _, payload = memory_entry
+
         if payload.code.client_id != client.client_id:
             raise TokenError("invalid_grant", "authorization code inválido")
 
-        access = AccessToken(
-            token=payload.poliedro_access_token,
-            client_id=client.client_id or "",
-            scopes=authorization_code.scopes,
-            expires_at=int(time.time()) + payload.expires_in,
-        )
-        self._access[payload.poliedro_access_token] = access
-
-        refresh_key: str | None = None
-        if payload.poliedro_refresh_token:
-            refresh_key = secrets.token_urlsafe(32)
-            self._refresh[refresh_key] = (
-                RefreshToken(
-                    token=refresh_key,
-                    client_id=client.client_id or "",
-                    scopes=authorization_code.scopes,
-                ),
-                payload.poliedro_refresh_token,
+        try:
+            token = self._issue_oauth_token(
+                client,
+                payload,
+                authorization_code.scopes,
             )
-
-        return OAuthToken(
-            access_token=payload.poliedro_access_token,
-            token_type="Bearer",
-            expires_in=payload.expires_in,
-            refresh_token=refresh_key,
-            scope=" ".join(authorization_code.scopes),
-        )
+            logger.info("MCP OAuth: token emitido com sucesso")
+            return token
+        except TokenError:
+            raise
+        except Exception as exc:
+            logger.exception("MCP OAuth: falha ao emitir token")
+            raise TokenError("invalid_grant", f"Não foi possível emitir token: {exc}") from exc
 
     async def load_refresh_token(
         self,
@@ -278,13 +400,6 @@ class PoliedroMcpAuthProvider(
         new_poliedro_refresh = tokens.get("refresh_token") or poliedro_refresh
         expires_in = int(tokens.get("expires_in") or ACCESS_TOKEN_TTL)
 
-        self._access[new_access] = AccessToken(
-            token=new_access,
-            client_id=client.client_id or "",
-            scopes=scopes,
-            expires_at=int(time.time()) + expires_in,
-        )
-
         new_refresh_key = secrets.token_urlsafe(32)
         self._refresh.pop(refresh_token.token, None)
         self._refresh[new_refresh_key] = (
@@ -296,8 +411,16 @@ class PoliedroMcpAuthProvider(
             new_poliedro_refresh,
         )
 
+        session_access = mint_session_access_token(new_access, expires_in=expires_in)
+        self._access[session_access] = AccessToken(
+            token=new_access,
+            client_id=client.client_id or "",
+            scopes=scopes,
+            expires_at=int(time.time()) + expires_in,
+        )
+
         return OAuthToken(
-            access_token=new_access,
+            access_token=session_access,
             token_type="Bearer",
             expires_in=expires_in,
             refresh_token=new_refresh_key,
@@ -311,6 +434,21 @@ class PoliedroMcpAuthProvider(
                 self._access.pop(token, None)
                 return None
             return stored
+
+        poliedro_token = extract_poliedro_access_token(token)
+        if poliedro_token:
+            try:
+                claims = decode_jwt_claims(poliedro_token)
+                exp = claims.get("exp")
+                if exp and time.time() > float(exp):
+                    return None
+            except Exception:
+                return None
+            return AccessToken(
+                token=poliedro_token,
+                client_id="poliedro",
+                scopes=DEFAULT_SCOPES,
+            )
 
         try:
             claims = decode_jwt_claims(token)

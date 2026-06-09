@@ -203,10 +203,10 @@ def mcp_login_post(
 
     try:
         redirect_url = provider.complete_login(
-        pending,
-        poliedro_access_token=access_token,
-        poliedro_refresh_token=tokens.get("refresh_token"),
-        expires_in=int(tokens.get("expires_in") or 3600),
+            pending,
+            poliedro_access_token=access_token,
+            poliedro_refresh_token=tokens.get("refresh_token"),
+            expires_in=int(tokens.get("expires_in") or 3600),
         )
     except ValueError as exc:
         return HTMLResponse(

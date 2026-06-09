@@ -12,6 +12,8 @@ from typing import Any
 CLIENT_ID_TTL = 60 * 60 * 24 * 30
 PENDING_TTL = 600
 AUTH_CODE_TTL = 120
+SESSION_TTL = 3600
+MAX_AUTH_CODE_URL_LEN = 2000
 
 
 def _secret() -> bytes:
@@ -67,4 +69,27 @@ def mint_pending_token(client_data: dict[str, Any], params_data: dict[str, Any])
         },
         ttl=PENDING_TTL,
     )
+
+
+def mint_auth_code_token(code_data: dict[str, Any]) -> str:
+    return sign_payload(
+        {"typ": "mcp_code", "jti": secrets.token_urlsafe(16), **code_data},
+        ttl=AUTH_CODE_TTL,
+    )
+
+
+def mint_session_access_token(poliedro_access_token: str, *, expires_in: int) -> str:
+    return sign_payload(
+        {"typ": "mcp_session", "pt": poliedro_access_token},
+        ttl=expires_in,
+    )
+
+
+def extract_poliedro_access_token(session_or_jwt: str) -> str | None:
+    try:
+        data = verify_payload(session_or_jwt, "mcp_session")
+        value = data.get("pt")
+        return str(value) if value else None
+    except Exception:
+        return None
 
