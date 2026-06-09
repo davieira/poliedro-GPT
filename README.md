@@ -11,30 +11,38 @@ API REST e servidor MCP **não oficial** para consultar notas, mensagens e calen
 - Boletim / notas
 - Mensagens e notificações
 - Calendário escolar (próximos eventos, semana, mês, ano)
-- Integração com **ChatGPT** (OAuth — cada usuário com sua conta)
-- Integração com **Claude** (MCP remoto via Custom Connector ou MCP local no Desktop)
+- Integração com **ChatGPT** (Actions + OAuth manual)
+- Integração com **Claude** (MCP remoto via Custom Connector — recomendado — ou MCP local no Desktop)
+
+## Integrações
+
+| Cliente | Como conectar | OAuth |
+|---------|---------------|-------|
+| **Claude** (web/app) | Custom Connector → `https://SEU-APP.onrender.com/mcp` | Automático (DCR) — só login P+ |
+| **ChatGPT** | Custom GPT → Actions + `openapi.json` | Manual (Client ID/Secret) |
+| **Claude Desktop** | MCP local (`python -m poliedro_mcp.server`) | Keychain no Mac |
 
 ## Como funciona
 
+Em ambos os casos, o usuário autentica com **usuário e senha do P+** (mesmos do [pmais.p4ed.com](https://pmais.p4ed.com/)). A API valida **diretamente no Poliedro**, obtém um token JWT temporário e consulta boletim, mensagens e calendário **em nome do usuário logado**. Cada pessoa vê **apenas os próprios dados** — não há conta compartilhada no servidor.
+
+**ChatGPT (Actions):**
+
 ```
-Usuário no ChatGPT
-    → clica "Sign in"
-    → tela de login P+ (sua API)
-    → autentica nos servidores do Poliedro
-    → recebe token JWT temporário
-    → consulta notas, mensagens e calendário
+Sign in → /oauth/authorize → login P+ → token OAuth → /api/v1/*
 ```
 
-1. O usuário entra com **usuário e senha do P+** (mesmos do `pmais.p4ed.com`).
-2. A API valida as credenciais **diretamente no Poliedro** e obtém um token JWT.
-3. Com esse token, a API consulta boletim, mensagens e calendário **em nome do usuário logado**.
-4. Cada pessoa vê **apenas os próprios dados** — não há conta compartilhada no servidor.
+**Claude (MCP remoto):**
+
+```
+Add connector → /mcp → OAuth automático → /mcp/login → ferramentas MCP (get_grades, …)
+```
 
 Guias: [ChatGPT](docs/chatgpt-setup.md) · [Claude MCP remoto](docs/claude-remote-setup.md)
 
 ## Privacidade — nada é armazenado no servidor
 
-**Em produção (API no Render + OAuth do ChatGPT):**
+**Em produção (API no Render — ChatGPT OAuth ou Claude MCP):**
 
 | Dado | Armazenado? |
 |------|-------------|
@@ -73,18 +81,23 @@ O **Scope** não é seu e-mail — são permissões padrão OAuth (`openid`, `pr
 
 ## Claude — MCP remoto (recomendado)
 
-1. Faça deploy no Render (mesmo app do ChatGPT)
-2. Gere a URL do conector:
+Funciona no **Claude web e app** via Custom Connectors — sem instalar nada no Mac e **sem** configurar Client ID/Secret (o servidor registra o cliente automaticamente via DCR).
+
+1. Faça deploy no Render (mesmo app do ChatGPT; defina `OAUTH_CLIENT_SECRET` e `API_BASE_URL`)
+2. Confira a URL do conector:
 
 ```bash
 python print_oauth_config.py https://SEU-APP.onrender.com
 ```
 
 3. No Claude → **Settings → Connectors → Add custom connector**
-4. Cole: `https://SEU-APP.onrender.com/mcp`
-5. Conecte e faça login com sua conta P+
+4. **Connector URL:** `https://SEU-APP.onrender.com/mcp`
+5. Conecte → faça login com usuário e senha do P+ (usuário **sem** `@p4ed.com`)
+6. Se tiver várias escolas ou dependentes, preencha na tela de login
 
-Guia completo: [docs/claude-remote-setup.md](docs/claude-remote-setup.md)
+**Ferramentas MCP:** `get_grades`, `get_messages`, `get_unread_messages`, `get_next_events`, calendário (semana/mês/ano), `poliedro_health_check`.
+
+Guia completo e troubleshooting: [docs/claude-remote-setup.md](docs/claude-remote-setup.md)
 
 ## Claude Desktop (MCP local)
 
@@ -104,13 +117,17 @@ Configuração do Claude: [docs/claude-desktop-config.example.json](docs/claude-
 |---------|-----------|
 | `GET /oauth/authorize` | Tela de login P+ (ChatGPT) |
 | `POST /oauth/token` | Token OAuth (ChatGPT) |
-| `POST /mcp` | MCP remoto (Claude Connectors) |
-| `GET /mcp/login` | Login OAuth do MCP |
-| `GET /api/v1/grades` | Boletim |
+| `POST /mcp` | MCP Streamable HTTP (Claude Connectors) |
+| `POST /mcp/register` | Dynamic Client Registration (Claude) |
+| `GET /mcp/authorize` | Início do OAuth MCP |
+| `POST /mcp/login` | Login P+ no fluxo MCP |
+| `POST /mcp/token` | Token OAuth MCP |
+| `GET /.well-known/oauth-authorization-server/mcp` | Metadados OAuth MCP (Claude) |
+| `GET /api/v1/grades` | Boletim (ChatGPT Actions) |
 | `GET /api/v1/messages` | Mensagens |
 | `GET /api/v1/calendar/*` | Calendário |
 
-Documentação interativa: `/docs` · OpenAPI: `/openapi.json`
+Documentação interativa: `/docs` · OpenAPI (ChatGPT): `/openapi.json`
 
 ## Variáveis de ambiente (Render)
 
@@ -118,9 +135,18 @@ Documentação interativa: `/docs` · OpenAPI: `/openapi.json`
 |----------|-------------|-----------|
 | `OAUTH_CLIENT_SECRET` | Sim | Secret do OAuth |
 | `OAUTH_CLIENT_ID` | Não | Padrão: `poliedro-gpt` |
-| `API_BASE_URL` | Recomendado | URL pública do app |
+| `API_BASE_URL` | Sim (produção) | URL pública do app — usada nos metadados OAuth/MCP |
 
-Não é necessário `POLIEDRO_TOKEN` nem `POLIEDRO_CONFIG_JSON` no modo OAuth.
+Não é necessário `POLIEDRO_TOKEN` nem `POLIEDRO_CONFIG_JSON` no modo OAuth/MCP remoto.
+
+## Problemas comuns (Claude MCP)
+
+| Sintoma | O que fazer |
+|---------|-------------|
+| Login retorna erro | Use as mesmas credenciais do `pmais.p4ed.com` (usuário sem `@p4ed.com`) |
+| Várias escolas/dependentes | Preencha School ID e Dependent ID na tela `/mcp/login` |
+| "Authorization failed" após login | Remova o conector, faça redeploy e crie de novo |
+| Conector não registra OAuth | Confirme `curl …/.well-known/oauth-authorization-server/mcp` |
 
 ## Desenvolvimento local
 
