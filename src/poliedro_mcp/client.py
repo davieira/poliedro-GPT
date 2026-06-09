@@ -9,17 +9,23 @@ from .config_loader import load_config
 
 
 class PoliedroClient:
-    def __init__(self) -> None:
-        self.config = load_config()
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        *,
+        access_token: str | None = None,
+    ) -> None:
+        self.config = config if config is not None else load_config()
         self.base_url = self.config["base_url"].rstrip("/")
         self.session = requests.Session()
         self._access_token: str | None = None
+        self._provided_token = access_token
         self.authenticate()
 
     def authenticate(self) -> None:
-        manual_token = get_manual_token()
-
-        if manual_token:
+        if self._provided_token:
+            access_token = self._provided_token
+        elif (manual_token := get_manual_token()):
             access_token = manual_token
         else:
             username = self.config.get("auth", {}).get("username")
@@ -52,6 +58,11 @@ class PoliedroClient:
         response = self.session.get(url, params=params, timeout=timeout)
 
         if response.status_code == 401:
+            if self._provided_token:
+                raise RuntimeError(
+                    "Token Poliedro expirado ou inválido. "
+                    "Faça login novamente em POST /api/v1/auth/login."
+                )
             self.authenticate()
             response = self.session.get(url, params=params, timeout=timeout)
 

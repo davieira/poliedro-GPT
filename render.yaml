@@ -9,8 +9,12 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.8"
-      - key: API_KEY
+      - key: OAUTH_CLIENT_ID
+        value: poliedro-gpt
+      - key: OAUTH_CLIENT_SECRET
         generateValue: true
+      - key: API_KEY
+        sync: false
       - key: POLIEDRO_TOKEN
         sync: false
       - key: POLIEDRO_CONFIG_JSON

@@ -59,10 +59,38 @@ def login_with_password(base_url: str, username: str, password: str) -> dict[str
     return response.json()
 
 
+def refresh_access_token(base_url: str, refresh_token: str) -> dict[str, Any]:
+    """Renova access_token via refresh_token do Keycloak."""
+    url = f"{base_url.rstrip('/')}/sso/auth/realms/poliedro/protocol/openid-connect/token"
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": "pmais",
+        "refresh_token": refresh_token,
+    }
+
+    response = requests.post(
+        url,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=20,
+    )
+
+    if response.status_code >= 400:
+        raise LoginError(
+            f"Falha ao renovar token Poliedro. HTTP {response.status_code}: {response.text}"
+        )
+
+    return response.json()
+
+
+def normalize_token(token: str) -> str:
+    if token.lower().startswith("bearer "):
+        token = token[7:]
+    return token.strip().replace("\n", "").replace("\r", "")
+
+
 def get_manual_token() -> str | None:
     token = os.getenv("POLIEDRO_TOKEN")
     if not token:
         return None
-    if token.lower().startswith("bearer "):
-        token = token[7:]
-    return token.strip().replace("\n", "").replace("\r", "")
+    return normalize_token(token)

@@ -37,8 +37,13 @@ def _parse_date(date_str: str | None, tz_name: str) -> datetime:
 
 
 class PoliedroService:
-    def __init__(self) -> None:
-        self.client = PoliedroClient()
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        *,
+        access_token: str | None = None,
+    ) -> None:
+        self.client = PoliedroClient(config, access_token=access_token)
         self.cfg = self.client.config
 
     def health_check(self) -> dict[str, Any]:

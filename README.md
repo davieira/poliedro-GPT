@@ -154,10 +154,11 @@ curl -s -H "X-API-Key: dev-local-key" http://localhost:8000/api/v1/health
 | Variável | Obrigatória | Descrição |
 |----------|-------------|-----------|
 | `API_KEY` | Sim | Chave que o ChatGPT envia no header `X-API-Key` |
-| `POLIEDRO_TOKEN` | Sim* | Token JWT do Poliedro (sem prefixo `Bearer`) |
-| `POLIEDRO_CONFIG_JSON` | Sim* | Config completo em JSON (uma linha) |
+| `POLIEDRO_TOKEN` | Não* | Token JWT fixo (modo single-user) |
+| `POLIEDRO_CONFIG_JSON` | Não* | Config completo em JSON (modo single-user) |
 
-\* No Render não há Keychain. Use token + config via env.
+\* Para **múltiplos usuários**, configure só `API_KEY`. Cada cliente autentica via `POST /api/v1/auth/login`.
+Para **um único usuário** no Render, use `POLIEDRO_TOKEN` + `POLIEDRO_CONFIG_JSON`.
 
 Para gerar `POLIEDRO_CONFIG_JSON` a partir do config local:
 
@@ -172,11 +173,15 @@ O token expira periodicamente. Quando isso acontecer, atualize `POLIEDRO_TOKEN` 
 
 Guia completo: [docs/chatgpt-setup.md](docs/chatgpt-setup.md)
 
-Resumo:
+Resumo (OAuth multi-usuário):
 
-1. Crie um Custom GPT
-2. Em **Actions → Authentication**: API Key, header `X-API-Key`
-3. Importe o schema: `https://SEU-APP.onrender.com/openapi.json`
+1. Defina `OAUTH_CLIENT_SECRET` no Render
+2. Crie um Custom GPT com **Actions → Authentication → OAuth**
+3. Authorization URL: `https://SEU-APP.onrender.com/oauth/authorize`
+4. Token URL: `https://SEU-APP.onrender.com/oauth/token`
+5. Importe o schema: `https://SEU-APP.onrender.com/openapi.json`
+
+O usuário verá o botão **Sign in** e a tela de login do P+.
 
 ## Rodar como MCP stdio
 
@@ -204,6 +209,9 @@ Substitua `/CAMINHO/ABSOLUTO/poliedro-mcp` pelo caminho real do projeto:
 
 | Método | Caminho | Equivalente MCP |
 |--------|---------|-----------------|
+| GET | `/oauth/authorize` | Login OAuth (ChatGPT) |
+| POST | `/oauth/token` | Token OAuth |
+| POST | `/api/v1/auth/login` | Login programático |
 | GET | `/api/v1/health` | `poliedro_health_check` |
 | GET | `/api/v1/grades` | `get_grades` |
 | GET | `/api/v1/messages` | `get_messages` |
@@ -213,7 +221,7 @@ Substitua `/CAMINHO/ABSOLUTO/poliedro-mcp` pelo caminho real do projeto:
 | GET | `/api/v1/calendar/month` | `get_month_events` |
 | GET | `/api/v1/calendar/year` | `get_year_events` |
 
-Todos os endpoints acima exigem o header `X-API-Key`.
+Todos os endpoints acima exigem `X-API-Key`. Para dados de um usuário específico, envie também `Authorization: Bearer <token_poliedro>`.
 
 ## Ferramentas MCP expostas
 
@@ -226,13 +234,47 @@ Todos os endpoints acima exigem o header `X-API-Key`.
 - `get_month_events`
 - `get_year_events`
 
+## Múltiplos usuários
+
+A API suporta **qualquer usuário do P+** sem precisar de config fixo por pessoa no servidor.
+
+### Modo multi-usuário (recomendado em produção)
+
+1. Configure apenas `API_KEY` no Render (não é obrigatório `POLIEDRO_TOKEN` nem `POLIEDRO_CONFIG_JSON`)
+2. Cada usuário faz login:
+
+```bash
+curl -s -X POST https://SUA-API.onrender.com/api/v1/auth/login \
+  -H "X-API-Key: SUA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"aluno.usuario","password":"senha"}'
+```
+
+3. Use o `access_token` retornado nas demais requisições:
+
+```bash
+curl -s https://SUA-API.onrender.com/api/v1/grades \
+  -H "X-API-Key: SUA_API_KEY" \
+  -H "Authorization: Bearer TOKEN_RETORNADO"
+```
+
+O servidor descobre automaticamente escola, matrícula e calendário a partir do JWT.
+
+### Contas com múltiplas escolas ou dependentes
+
+Se a conta tiver mais de uma escola ou dependente, a API responde `409` com a lista de opções. Repita a requisição informando `school_id` ou `dependent_id` (no login ou como query param).
+
+### Modo single-user (legado)
+
+Sem header `Authorization`, a API usa a conta configurada no servidor (`config.json`, `POLIEDRO_CONFIG_JSON` ou Keychain). Útil para uso pessoal local ou um único Custom GPT.
+
 ## Segurança em produção
 
 - HTTPS obrigatório (Render fornece automaticamente)
-- `API_KEY` forte e exclusiva para o ChatGPT
-- `POLIEDRO_TOKEN` apenas como secret no Render (nunca no repositório)
-- Renovar token quando expirar
-- Para múltiplos usuários, seria necessário banco + cofre de credenciais (fora do escopo atual)
+- `API_KEY` forte para proteger o serviço
+- Tokens JWT do Poliedro são de curta duração — renove via `/api/v1/auth/login`
+- Não armazene senhas no servidor; cada cliente envia credenciais apenas no login
+- Para uso local/MCP, continue usando Keychain via `setup_login`
 
 ## Licença
 

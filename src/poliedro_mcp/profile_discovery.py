@@ -17,6 +17,18 @@ class ProfileDiscoveryError(RuntimeError):
     pass
 
 
+class ProfileChoiceRequired(ProfileDiscoveryError):
+    """Perfil ambíguo: o cliente deve informar school_id ou dependent_id."""
+
+    def __init__(self, choice_type: str, options: list[dict[str, Any]]) -> None:
+        self.choice_type = choice_type
+        self.options = options
+        super().__init__(
+            f"Múltiplas opções de {choice_type}. "
+            f"Informe o parâmetro correspondente na requisição."
+        )
+
+
 def decode_jwt_claims(access_token: str) -> dict[str, Any]:
     parts = access_token.split(".")
     if len(parts) < 2:
@@ -148,11 +160,98 @@ def _resolve_school_year(years_payload: dict[str, Any]) -> tuple[int, int]:
     return school_year, int(enrollment_id)
 
 
+def _select_school_link(
+    school_links: list[dict[str, Any]],
+    *,
+    school_id: int | None,
+    interactive: bool,
+) -> dict[str, Any]:
+    if school_id is not None:
+        for link in school_links:
+            if int(link["idEscola"]) == school_id:
+                return link
+        raise ProfileDiscoveryError(
+            f"Escola {school_id} não vinculada à conta. "
+            f"Opções: {[int(item['idEscola']) for item in school_links]}"
+        )
+
+    if interactive and len(school_links) > 1:
+        return _pick_item(
+            school_links,
+            "escola",
+            lambda item: (
+                f"idEscola={item.get('idEscola')} "
+                f"perfil={item.get('idPerfil')} "
+                f"({(item.get('usuario') or {}).get('nome', '')})"
+            ),
+        )
+
+    if len(school_links) > 1:
+        raise ProfileChoiceRequired(
+            "escola",
+            [
+                {
+                    "school_id": int(item["idEscola"]),
+                    "role_id": int(item["idPerfil"]),
+                    "name": (item.get("usuario") or {}).get("nome"),
+                }
+                for item in school_links
+            ],
+        )
+
+    return school_links[0]
+
+
+def _select_dependent(
+    dependents: list[dict[str, Any]],
+    *,
+    dependent_id: int | None,
+    interactive: bool,
+) -> dict[str, Any]:
+    if not dependents:
+        raise ProfileDiscoveryError(
+            "Conta de responsável sem dependentes vinculados à escola."
+        )
+
+    if dependent_id is not None:
+        for dependent in dependents:
+            if int(dependent["id"]) == dependent_id:
+                return dependent
+        raise ProfileDiscoveryError(
+            f"Dependente {dependent_id} não encontrado. "
+            f"Opções: {[int(item['id']) for item in dependents]}"
+        )
+
+    if interactive and len(dependents) > 1:
+        return _pick_item(
+            dependents,
+            "dependente",
+            lambda item: f"{item.get('name')} — {item.get('emailP4ed')}",
+        )
+
+    if len(dependents) > 1:
+        raise ProfileChoiceRequired(
+            "dependente",
+            [
+                {
+                    "dependent_id": int(item["id"]),
+                    "name": item.get("name"),
+                    "email_p4ed": item.get("emailP4ed") or item.get("email"),
+                }
+                for item in dependents
+            ],
+        )
+
+    return dependents[0]
+
+
 def discover_profile_config(
     base_url: str,
     access_token: str,
     *,
     interactive: bool = True,
+    school_id: int | None = None,
+    dependent_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Monta auth, student e calendar a partir do token e das APIs do P+.
@@ -167,19 +266,11 @@ def discover_profile_config(
         raise ProfileDiscoveryError("Token sem idUsuario.")
 
     school_links = _list_school_links(base_url, access_token, int(user_id))
-
-    if interactive and len(school_links) > 1:
-        school_link = _pick_item(
-            school_links,
-            "escola",
-            lambda item: (
-                f"idEscola={item.get('idEscola')} "
-                f"perfil={item.get('idPerfil')} "
-                f"({(item.get('usuario') or {}).get('nome', '')})"
-            ),
-        )
-    else:
-        school_link = school_links[0]
+    school_link = _select_school_link(
+        school_links,
+        school_id=school_id,
+        interactive=interactive,
+    )
 
     school_id = int(school_link["idEscola"])
     profile_role_id = int(school_link["idPerfil"])
@@ -192,18 +283,11 @@ def discover_profile_config(
         dependents = _list_dependents(
             base_url, access_token, int(user_id), school_id
         )
-        if interactive and len(dependents) > 1:
-            dependent = _pick_item(
-                dependents,
-                "dependente",
-                lambda item: f"{item.get('name')} — {item.get('emailP4ed')}",
-            )
-        elif dependents:
-            dependent = dependents[0]
-        else:
-            raise ProfileDiscoveryError(
-                "Conta de responsável sem dependentes vinculados à escola."
-            )
+        dependent = _select_dependent(
+            dependents,
+            dependent_id=dependent_id,
+            interactive=interactive,
+        )
 
         student_owner_id = int(dependent["id"])
         email_p4ed = dependent.get("emailP4ed") or dependent.get("email")
