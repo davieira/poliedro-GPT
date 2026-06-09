@@ -22,11 +22,11 @@ from pydantic import AnyUrl
 from .api_base import api_base_url
 from .mcp_oauth_tokens import (
     AUTH_CODE_TTL,
-    mint_auth_code_token,
     mint_client_id,
     mint_pending_token,
     verify_payload,
 )
+from .logger import logger
 from .profile_discovery import decode_jwt_claims
 
 ACCESS_TOKEN_TTL = 3600
@@ -56,13 +56,17 @@ class PoliedroMcpAuthProvider(
         self._clients: dict[str, OAuthClientInformationFull] = {}
         self._refresh: dict[str, tuple[RefreshToken, str | None]] = {}
         self._access: dict[str, AccessToken] = {}
-        self._used_code_jtis: dict[str, float] = {}
+        self._codes: dict[str, tuple[float, _CodePayload]] = {}
 
-    def _purge_used_codes(self) -> None:
+    def _purge_expired_codes(self) -> None:
         now = time.time()
-        expired = [key for key, seen_at in self._used_code_jtis.items() if now - seen_at > AUTH_CODE_TTL]
+        expired = [
+            key
+            for key, (created_at, _) in self._codes.items()
+            if now - created_at > AUTH_CODE_TTL
+        ]
         for key in expired:
-            self._used_code_jtis.pop(key, None)
+            self._codes.pop(key, None)
 
     def _client_to_dict(self, client: OAuthClientInformationFull) -> dict[str, Any]:
         data = client.model_dump(mode="json", exclude_none=True)
@@ -88,40 +92,16 @@ class PoliedroMcpAuthProvider(
         except Exception:
             return None
 
-    def _parse_code_token(self, code: str) -> _CodePayload | None:
-        try:
-            data = verify_payload(code, "mcp_code")
-        except Exception:
+    def _load_code_payload(self, authorization_code: str) -> _CodePayload | None:
+        self._purge_expired_codes()
+        entry = self._codes.get(authorization_code)
+        if entry is None:
             return None
-
-        jti = data.get("jti")
-        if not jti:
+        created_at, payload = entry
+        if time.time() - created_at > AUTH_CODE_TTL:
+            self._codes.pop(authorization_code, None)
             return None
-
-        self._purge_used_codes()
-        if jti in self._used_code_jtis:
-            return None
-
-        client = self._restore_client(str(data["client_id"]))
-        if client is None:
-            return None
-
-        auth_code = AuthorizationCode(
-            code=code,
-            scopes=data.get("scopes") or DEFAULT_SCOPES,
-            expires_at=float(data["expires_at"]),
-            client_id=client.client_id or "",
-            code_challenge=data["code_challenge"],
-            redirect_uri=AnyUrl(data["redirect_uri"]),
-            redirect_uri_provided_explicitly=bool(data.get("redirect_uri_provided_explicitly")),
-            resource=data.get("resource"),
-        )
-        return _CodePayload(
-            code=auth_code,
-            poliedro_access_token=data["poliedro_access_token"],
-            poliedro_refresh_token=data.get("poliedro_refresh_token"),
-            expires_in=int(data.get("expires_in") or ACCESS_TOKEN_TTL),
-        )
+        return payload
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         return self._restore_client(client_id)
@@ -181,23 +161,27 @@ class PoliedroMcpAuthProvider(
         params = entry.params
         now = time.time()
 
-        client_data = self._client_to_dict(client)
-        client_data["client_id"] = client.client_id
-        code_str = mint_auth_code_token(
-            {
-                "client_id": client.client_id,
-                "client": client_data,
-                "scopes": params.scopes or DEFAULT_SCOPES,
-                "expires_at": now + AUTH_CODE_TTL,
-                "code_challenge": params.code_challenge,
-                "redirect_uri": str(params.redirect_uri),
-                "redirect_uri_provided_explicitly": params.redirect_uri_provided_explicitly,
-                "resource": params.resource,
-                "poliedro_access_token": poliedro_access_token,
-                "poliedro_refresh_token": poliedro_refresh_token,
-                "expires_in": expires_in,
-            }
+        code_str = secrets.token_urlsafe(32)
+        auth_code = AuthorizationCode(
+            code=code_str,
+            scopes=params.scopes or DEFAULT_SCOPES,
+            expires_at=now + AUTH_CODE_TTL,
+            client_id=client.client_id or "",
+            code_challenge=params.code_challenge,
+            redirect_uri=params.redirect_uri,
+            redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
+            resource=params.resource,
         )
+        self._codes[code_str] = (
+            now,
+            _CodePayload(
+                code=auth_code,
+                poliedro_access_token=poliedro_access_token,
+                poliedro_refresh_token=poliedro_refresh_token,
+                expires_in=expires_in,
+            ),
+        )
+        logger.info("MCP OAuth: authorization code emitido (%d chars)", len(code_str))
 
         return construct_redirect_uri(
             str(params.redirect_uri),
@@ -210,7 +194,7 @@ class PoliedroMcpAuthProvider(
         client: OAuthClientInformationFull,
         authorization_code: str,
     ) -> AuthorizationCode | None:
-        payload = self._parse_code_token(authorization_code)
+        payload = self._load_code_payload(authorization_code)
         if payload is None:
             return None
         if payload.code.client_id != client.client_id:
@@ -224,13 +208,12 @@ class PoliedroMcpAuthProvider(
         client: OAuthClientInformationFull,
         authorization_code: AuthorizationCode,
     ) -> OAuthToken:
-        payload = self._parse_code_token(authorization_code.code)
+        payload = self._codes.pop(authorization_code.code, None)
         if payload is None:
             raise TokenError("invalid_grant", "authorization code inválido")
-
-        data = verify_payload(authorization_code.code, "mcp_code")
-        jti = str(data.get("jti") or "")
-        self._used_code_jtis[jti] = time.time()
+        _, payload = payload
+        if payload.code.client_id != client.client_id:
+            raise TokenError("invalid_grant", "authorization code inválido")
 
         access = AccessToken(
             token=payload.poliedro_access_token,

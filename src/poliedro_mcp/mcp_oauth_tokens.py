@@ -68,13 +68,3 @@ def mint_pending_token(client_data: dict[str, Any], params_data: dict[str, Any])
         ttl=PENDING_TTL,
     )
 
-
-def mint_auth_code_token(code_data: dict[str, Any]) -> str:
-    return sign_payload(
-        {
-            "typ": "mcp_code",
-            "jti": secrets.token_urlsafe(16),
-            **code_data,
-        },
-        ttl=AUTH_CODE_TTL,
-    )

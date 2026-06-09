@@ -61,6 +61,10 @@ Igual ao ChatGPT OAuth:
 
 ## Troubleshooting
 
+**"Authorization with the MCP server failed" (após login)**
+
+Geralmente o callback do Claude truncava o `code` OAuth por ser grande demais (>3 KB). Confirme que o deploy mais recente está ativo e **recrie o conector**.
+
 **"Couldn't register with … sign-in service"**
 
 O Claude descobre OAuth em `/.well-known/oauth-authorization-server/mcp` (não em `/mcp/.well-known/...`). Confirme que responde com `registration_endpoint`:
