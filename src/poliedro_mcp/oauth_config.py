@@ -88,6 +88,8 @@ def build_config(base_url: str, metadata: dict | None = None) -> dict[str, str]:
         "scope": DEFAULT_SCOPE,
         "openapi_url": f"{base_url}/openapi.json",
         "metadata_url": f"{base_url}{METADATA_PATH}",
+        "mcp_connector_url": f"{base_url}/mcp",
+        "mcp_metadata_url": f"{base_url}/.well-known/oauth-protected-resource/mcp",
     }
 
 
@@ -107,6 +109,14 @@ def print_human(config: dict[str, str]) -> None:
     print("--- Extras ---")
     print(f"  OpenAPI (importar) : {config['openapi_url']}")
     print(f"  Metadados OAuth    : {config['metadata_url']}")
+    print()
+    print("=== MCP remoto (Claude Connectors) ===")
+    print()
+    print(f"  Connector URL      : {config['mcp_connector_url']}")
+    print(f"  Metadados MCP      : {config['mcp_metadata_url']}")
+    print()
+    print("No Claude: Settings → Connectors → Add custom connector → cole a Connector URL.")
+    print("OAuth é automático (DCR); não precisa Client ID/Secret manual.")
     print()
     print("No ChatGPT: Actions → Authentication → OAuth → cole os valores acima.")
     print("Token Exchange Method: Default (POST request)")

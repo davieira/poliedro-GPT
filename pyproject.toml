@@ -1,6 +1,6 @@
 [project]
 name = "poliedro-mcp"
-version = "0.4.0"
+version = "0.5.0"
 description = "API REST e MCP server para o portal Poliedro/P+"
 license = "MIT"
 license-files = ["LICENSE"]

@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 
 from .auth import LoginError
 from .logger import logger
+from .api_base import api_base_url
+from .mcp_remote import get_mcp_session_manager, get_mcp_starlette_app, router as mcp_router
 from .oauth_proxy import router as oauth_router
 from .profile_discovery import ProfileChoiceRequired, ProfileDiscoveryError
 from .user_context import get_service, login_and_build_profile
@@ -184,7 +186,9 @@ def _handle_service_error(exc: Exception) -> JSONResponse:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logger.info("API Poliedro iniciando (porta=%s)", os.getenv("PORT", "8000"))
-    yield
+    session_manager = get_mcp_session_manager()
+    async with session_manager.run():
+        yield
     logger.info("API Poliedro encerrando")
 
 
@@ -194,20 +198,12 @@ app = FastAPI(
         "API REST não oficial para consultar boletim, mensagens e calendário "
         "do portal Poliedro/P+. Suporta múltiplos usuários via token JWT do P+."
     ),
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
 )
-
-
-def _api_base_url() -> str:
-    for key in ("API_BASE_URL", "RENDER_EXTERNAL_URL"):
-        url = os.getenv(key, "").strip().rstrip("/")
-        if url:
-            return url
-    return "https://poliedro-api.onrender.com"
 
 
 def custom_openapi() -> dict[str, Any]:
@@ -222,9 +218,9 @@ def custom_openapi() -> dict[str, Any]:
         description=app.description,
         routes=app.routes,
     )
-    schema["servers"] = [{"url": _api_base_url()}]
+    schema["servers"] = [{"url": api_base_url()}]
     components = schema.setdefault("components", {}).setdefault("securitySchemes", {})
-    base = _api_base_url()
+    base = api_base_url()
     components["OAuth2"] = {
         "type": "oauth2",
         "flows": {
@@ -252,6 +248,8 @@ def custom_openapi() -> dict[str, Any]:
 
 app.openapi = custom_openapi  # type: ignore[method-assign]
 app.include_router(oauth_router)
+app.include_router(mcp_router)
+app.mount("/mcp", get_mcp_starlette_app())
 
 app.add_middleware(
     CORSMiddleware,

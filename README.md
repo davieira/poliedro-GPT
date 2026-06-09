@@ -12,7 +12,7 @@ API REST e servidor MCP **não oficial** para consultar notas, mensagens e calen
 - Mensagens e notificações
 - Calendário escolar (próximos eventos, semana, mês, ano)
 - Integração com **ChatGPT** (OAuth — cada usuário com sua conta)
-- Integração com **Claude Desktop** (MCP local)
+- Integração com **Claude** (MCP remoto via Custom Connector ou MCP local no Desktop)
 
 ## Como funciona
 
@@ -30,7 +30,7 @@ Usuário no ChatGPT
 3. Com esse token, a API consulta boletim, mensagens e calendário **em nome do usuário logado**.
 4. Cada pessoa vê **apenas os próprios dados** — não há conta compartilhada no servidor.
 
-Guia completo do ChatGPT: [docs/chatgpt-setup.md](docs/chatgpt-setup.md)
+Guias: [ChatGPT](docs/chatgpt-setup.md) · [Claude MCP remoto](docs/claude-remote-setup.md)
 
 ## Privacidade — nada é armazenado no servidor
 
@@ -71,6 +71,21 @@ python print_oauth_config.py https://SEU-APP.onrender.com
 
 O **Scope** não é seu e-mail — são permissões padrão OAuth (`openid`, `profile`, `email`).
 
+## Claude — MCP remoto (recomendado)
+
+1. Faça deploy no Render (mesmo app do ChatGPT)
+2. Gere a URL do conector:
+
+```bash
+python print_oauth_config.py https://SEU-APP.onrender.com
+```
+
+3. No Claude → **Settings → Connectors → Add custom connector**
+4. Cole: `https://SEU-APP.onrender.com/mcp`
+5. Conecte e faça login com sua conta P+
+
+Guia completo: [docs/claude-remote-setup.md](docs/claude-remote-setup.md)
+
 ## Claude Desktop (MCP local)
 
 ```bash
@@ -87,8 +102,10 @@ Configuração do Claude: [docs/claude-desktop-config.example.json](docs/claude-
 
 | Caminho | Descrição |
 |---------|-----------|
-| `GET /oauth/authorize` | Tela de login P+ |
+| `GET /oauth/authorize` | Tela de login P+ (ChatGPT) |
 | `POST /oauth/token` | Token OAuth (ChatGPT) |
+| `POST /mcp` | MCP remoto (Claude Connectors) |
+| `GET /mcp/login` | Login OAuth do MCP |
 | `GET /api/v1/grades` | Boletim |
 | `GET /api/v1/messages` | Mensagens |
 | `GET /api/v1/calendar/*` | Calendário |

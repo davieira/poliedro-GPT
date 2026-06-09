@@ -101,15 +101,31 @@ def _validate_client_secret(client_secret: str) -> None:
 
 def _login_html(
     *,
-    client_id: str,
-    redirect_uri: str,
-    state: str,
-    response_type: str,
-    scope: str | None,
+    client_id: str = "",
+    redirect_uri: str = "",
+    state: str = "",
+    response_type: str = "code",
+    scope: str | None = None,
+    form_action: str = "/oauth/authorize",
+    pending: str | None = None,
     error: str | None = None,
     choice_error: dict[str, Any] | None = None,
 ) -> str:
-    hidden_scope = f'<input type="hidden" name="scope" value="{html.escape(scope or "")}">' if scope else ""
+    oauth_hidden = ""
+    if pending:
+        oauth_hidden += f'<input type="hidden" name="pending" value="{html.escape(pending)}">'
+    if client_id:
+        oauth_hidden += f'<input type="hidden" name="client_id" value="{html.escape(client_id)}">'
+    if redirect_uri:
+        oauth_hidden += f'<input type="hidden" name="redirect_uri" value="{html.escape(redirect_uri)}">'
+    if state:
+        oauth_hidden += f'<input type="hidden" name="state" value="{html.escape(state)}">'
+    if response_type:
+        oauth_hidden += (
+            f'<input type="hidden" name="response_type" value="{html.escape(response_type)}">'
+        )
+    if scope:
+        oauth_hidden += f'<input type="hidden" name="scope" value="{html.escape(scope)}">'
     error_block = ""
     if error:
         error_block = f'<p class="error">{html.escape(error)}</p>'
@@ -162,12 +178,8 @@ def _login_html(
       neste serviço — nem em disco, banco de dados ou logs — em hipótese alguma.
     </div>
     {error_block}
-    <form method="post" action="/oauth/authorize">
-      <input type="hidden" name="client_id" value="{html.escape(client_id)}">
-      <input type="hidden" name="redirect_uri" value="{html.escape(redirect_uri)}">
-      <input type="hidden" name="state" value="{html.escape(state)}">
-      <input type="hidden" name="response_type" value="{html.escape(response_type)}">
-      {hidden_scope}
+    <form method="post" action="{html.escape(form_action)}">
+      {oauth_hidden}
       <label for="username">Usuário</label>
       <input id="username" name="username" autocomplete="username" required>
       <label for="password">Senha</label>
