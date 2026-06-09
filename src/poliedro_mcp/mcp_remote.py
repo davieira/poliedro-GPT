@@ -172,34 +172,47 @@ def mcp_login_post(
         return HTMLResponse(_mcp_login_html(pending=pending, error=str(exc)), status_code=401)
 
     access_token = tokens["access_token"]
-    try:
-        discover_profile_config(
-            base_url,
-            access_token,
-            interactive=False,
-            school_id=_parse_optional_int(school_id),
-            dependent_id=_parse_optional_int(dependent_id),
-        )
-    except ProfileChoiceRequired as exc:
-        return HTMLResponse(
-            _mcp_login_html(
-                pending=pending,
-                choice_error={"tipo": exc.choice_type, "opcoes": exc.options},
-            ),
-            status_code=409,
-        )
-    except Exception as exc:
-        return HTMLResponse(
-            _mcp_login_html(pending=pending, error=f"Não foi possível carregar o perfil: {exc}"),
-            status_code=400,
-        )
+    parsed_school_id = _parse_optional_int(school_id)
+    parsed_dependent_id = _parse_optional_int(dependent_id)
 
-    redirect_url = provider.complete_login(
+    if parsed_school_id is not None or parsed_dependent_id is not None:
+        try:
+            discover_profile_config(
+                base_url,
+                access_token,
+                interactive=False,
+                school_id=parsed_school_id,
+                dependent_id=parsed_dependent_id,
+            )
+        except ProfileChoiceRequired as exc:
+            return HTMLResponse(
+                _mcp_login_html(
+                    pending=pending,
+                    choice_error={"tipo": exc.choice_type, "opcoes": exc.options},
+                ),
+                status_code=409,
+            )
+        except Exception as exc:
+            return HTMLResponse(
+                _mcp_login_html(
+                    pending=pending,
+                    error=f"Não foi possível carregar o perfil: {exc}",
+                ),
+                status_code=400,
+            )
+
+    try:
+        redirect_url = provider.complete_login(
         pending,
         poliedro_access_token=access_token,
         poliedro_refresh_token=tokens.get("refresh_token"),
         expires_in=int(tokens.get("expires_in") or 3600),
-    )
+        )
+    except ValueError as exc:
+        return HTMLResponse(
+            _mcp_login_html(pending=pending, error=str(exc)),
+            status_code=400,
+        )
     return RedirectResponse(redirect_url, status_code=302)
 
 
