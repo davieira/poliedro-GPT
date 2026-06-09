@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.server.auth.handlers.metadata import MetadataHandler, ProtectedResourceMetadataHandler
 from mcp.server.auth.routes import build_metadata
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
@@ -14,6 +16,7 @@ from starlette.applications import Starlette
 
 from .api_base import api_base_url, mcp_base_url
 from .auth import LoginError, login_with_password
+from .logger import logger
 from .mcp_auth_provider import get_mcp_auth_provider
 from .mcp_tools import register_tools
 from .oauth_proxy import GITHUB_REPO_URL, _login_html
@@ -35,6 +38,22 @@ def _parse_optional_int(value: str | None) -> int | None:
         return None
 
 
+def _mcp_transport_security() -> TransportSecuritySettings:
+    """Permite o Host do Render; o default do SDK só aceita localhost."""
+    public_host = urlparse(api_base_url()).netloc
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            public_host,
+            f"{public_host}:*",
+            "localhost",
+            "localhost:*",
+            "127.0.0.1",
+            "127.0.0.1:*",
+        ],
+    )
+
+
 def create_mcp_server() -> FastMCP:
     global _mcp_server, _mcp_starlette
     if _mcp_server is not None:
@@ -53,6 +72,8 @@ def create_mcp_server() -> FastMCP:
         auth_server_provider=provider,
         stateless_http=True,
         streamable_http_path="/",
+        host="0.0.0.0",
+        transport_security=_mcp_transport_security(),
         auth=AuthSettings(
             issuer_url=issuer,
             resource_server_url=issuer,
@@ -119,9 +140,14 @@ async def mcp_openid_metadata_rfc8414(request: Request) -> Response:
 
 
 @router.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"])
-async def mcp_entry_no_trailing_slash() -> RedirectResponse:
-    """Evita 307 que quebra POST do Streamable HTTP em alguns clientes."""
-    return RedirectResponse(url="/mcp/", status_code=308)
+async def mcp_entry_no_trailing_slash(request: Request) -> None:
+    """Encaminha /mcp → sub-app sem redirect (308 quebrava Host header no Claude)."""
+    mcp_app = get_mcp_starlette_app()
+    scope = request.scope
+    scope["path"] = "/"
+    scope["raw_path"] = b"/"
+    scope["root_path"] = (scope.get("root_path") or "") + "/mcp"
+    await mcp_app(scope, request.receive, request._send)
 
 
 @router.get("/.well-known/oauth-protected-resource/mcp")
@@ -169,6 +195,7 @@ def mcp_login_post(
     try:
         tokens = login_with_password(base_url, username.strip(), password)
     except LoginError as exc:
+        logger.warning("MCP OAuth: login P+ falhou para usuário %s: %s", username.strip(), exc)
         return HTMLResponse(_mcp_login_html(pending=pending, error=str(exc)), status_code=401)
 
     access_token = tokens["access_token"]
