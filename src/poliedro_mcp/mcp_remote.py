@@ -4,8 +4,9 @@ from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from mcp.server.auth.handlers.metadata import ProtectedResourceMetadataHandler
-from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+from mcp.server.auth.handlers.metadata import MetadataHandler, ProtectedResourceMetadataHandler
+from mcp.server.auth.routes import build_metadata
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.shared.auth import ProtectedResourceMetadata
 from mcp.server.fastmcp import FastMCP
 from pydantic import AnyHttpUrl
@@ -57,11 +58,7 @@ def create_mcp_server() -> FastMCP:
             resource_server_url=issuer,
             service_documentation_url=AnyHttpUrl(f"{api_base_url()}/docs"),
             required_scopes=["openid"],
-            client_registration_options=ClientRegistrationOptions(
-                enabled=True,
-                default_scopes=["openid", "profile", "email"],
-                valid_scopes=["openid", "profile", "email"],
-            ),
+            client_registration_options=_mcp_client_registration_options(),
         ),
     )
     register_tools(mcp)
@@ -78,6 +75,53 @@ def get_mcp_starlette_app() -> Starlette:
 
 def get_mcp_session_manager():
     return create_mcp_server().session_manager
+
+
+def _mcp_client_registration_options() -> ClientRegistrationOptions:
+    return ClientRegistrationOptions(
+        enabled=True,
+        default_scopes=["openid", "profile", "email"],
+        valid_scopes=["openid", "profile", "email"],
+    )
+
+
+def _mcp_oauth_metadata_handler() -> MetadataHandler:
+    """Metadados OAuth do MCP (RFC 8414 path-aware + registration_endpoint)."""
+    issuer = AnyHttpUrl(mcp_base_url())
+    metadata = build_metadata(
+        issuer_url=issuer,
+        service_documentation_url=AnyHttpUrl(f"{api_base_url()}/docs"),
+        client_registration_options=_mcp_client_registration_options(),
+        revocation_options=RevocationOptions(),
+    )
+    metadata = metadata.model_copy(
+        update={
+            "token_endpoint_auth_methods_supported": [
+                "none",
+                "client_secret_post",
+                "client_secret_basic",
+            ],
+        }
+    )
+    return MetadataHandler(metadata)
+
+
+@router.get("/.well-known/oauth-authorization-server/mcp")
+async def mcp_oauth_metadata_rfc8414(request: Request) -> Response:
+    """RFC 8414 — metadados do issuer /mcp na raiz do site (exigido pelo Claude)."""
+    return await _mcp_oauth_metadata_handler().handle(request)
+
+
+@router.get("/.well-known/openid-configuration/mcp")
+async def mcp_openid_metadata_rfc8414(request: Request) -> Response:
+    """Fallback OIDC discovery (RFC 8414 §5) para conectores MCP."""
+    return await _mcp_oauth_metadata_handler().handle(request)
+
+
+@router.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"])
+async def mcp_entry_no_trailing_slash() -> RedirectResponse:
+    """Evita 307 que quebra POST do Streamable HTTP em alguns clientes."""
+    return RedirectResponse(url="/mcp/", status_code=308)
 
 
 @router.get("/.well-known/oauth-protected-resource/mcp")

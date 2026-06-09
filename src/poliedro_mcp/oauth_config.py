@@ -1,4 +1,4 @@
-"""Exibe configuração OAuth para ChatGPT Actions."""
+"""Exibe configuração para ChatGPT Actions e Claude MCP remoto."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ from .config_loader import project_root
 
 DEFAULT_CLIENT_ID = "poliedro-gpt"
 DEFAULT_SCOPE = "openid profile email"
-METADATA_PATH = "/.well-known/oauth-authorization-server"
+CHATGPT_METADATA_PATH = "/.well-known/oauth-authorization-server"
+MCP_METADATA_PATH = "/.well-known/oauth-protected-resource/mcp"
+MCP_OAUTH_METADATA_PATH = "/.well-known/oauth-authorization-server/mcp"
 
 
 def _load_dotenv() -> None:
@@ -52,8 +54,7 @@ def _resolve_base_url(cli_url: str | None) -> str:
     )
 
 
-def _fetch_metadata(base_url: str) -> dict:
-    url = f"{base_url}{METADATA_PATH}"
+def _fetch_json(url: str) -> dict:
     response = requests.get(url, timeout=20)
     response.raise_for_status()
     return response.json()
@@ -65,79 +66,108 @@ def _mask_secret(secret: str) -> str:
     return f"{secret[:4]}...{secret[-4:]}"
 
 
-def build_config(base_url: str, metadata: dict | None = None) -> dict[str, str]:
-    if metadata is None:
-        try:
-            metadata = _fetch_metadata(base_url)
-        except requests.RequestException as exc:
-            print(f"Aviso: não foi possível buscar metadados ({exc}).", file=sys.stderr)
-            metadata = {}
+def build_config(base_url: str) -> dict[str, object]:
+    chatgpt_metadata: dict = {}
+    try:
+        chatgpt_metadata = _fetch_json(f"{base_url}{CHATGPT_METADATA_PATH}")
+    except requests.RequestException as exc:
+        print(f"Aviso: metadados ChatGPT indisponíveis ({exc}).", file=sys.stderr)
 
     client_id = os.getenv("OAUTH_CLIENT_ID", DEFAULT_CLIENT_ID).strip() or DEFAULT_CLIENT_ID
     client_secret = os.getenv("OAUTH_CLIENT_SECRET", "").strip()
 
-    auth_url = metadata.get("authorization_endpoint") or f"{base_url}/oauth/authorize"
-    token_url = metadata.get("token_endpoint") or f"{base_url}/oauth/token"
+    auth_url = chatgpt_metadata.get("authorization_endpoint") or f"{base_url}/oauth/authorize"
+    token_url = chatgpt_metadata.get("token_endpoint") or f"{base_url}/oauth/token"
+
+    mcp_connector_url = f"{base_url}/mcp"
+    mcp_metadata_url = f"{base_url}{MCP_METADATA_PATH}"
+    mcp_auth_metadata_url = f"{base_url}{MCP_OAUTH_METADATA_PATH}"
 
     return {
         "base_url": base_url,
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "authorization_url": auth_url,
-        "token_url": token_url,
-        "scope": DEFAULT_SCOPE,
-        "openapi_url": f"{base_url}/openapi.json",
-        "metadata_url": f"{base_url}{METADATA_PATH}",
-        "mcp_connector_url": f"{base_url}/mcp",
-        "mcp_metadata_url": f"{base_url}/.well-known/oauth-protected-resource/mcp",
+        "chatgpt": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "authorization_url": auth_url,
+            "token_url": token_url,
+            "scope": DEFAULT_SCOPE,
+            "openapi_url": f"{base_url}/openapi.json",
+            "metadata_url": f"{base_url}{CHATGPT_METADATA_PATH}",
+            "token_exchange_method": "Default (POST request)",
+        },
+        "claude": {
+            "connector_url": mcp_connector_url,
+            "metadata_url": mcp_metadata_url,
+            "authorization_metadata_url": mcp_auth_metadata_url,
+            "oauth_mode": "automatic (DCR)",
+        },
     }
 
 
-def print_human(config: dict[str, str]) -> None:
-    secret = config["client_secret"]
+def print_human(config: dict[str, object]) -> None:
+    chatgpt = config["chatgpt"]
+    assert isinstance(chatgpt, dict)
+    claude = config["claude"]
+    assert isinstance(claude, dict)
+
+    secret = str(chatgpt.get("client_secret") or "")
     secret_display = secret if secret else "(não definido — copie do Render → Environment)"
 
     print()
-    print("=== OAuth para ChatGPT Actions ===")
+    print("=" * 50)
+    print("  ChatGPT Actions")
+    print("=" * 50)
     print()
-    print(f"  Client ID          : {config['client_id']}")
+    print(f"  Client ID          : {chatgpt['client_id']}")
     print(f"  Client Secret      : {secret_display}")
-    print(f"  Authorization URL  : {config['authorization_url']}")
-    print(f"  Token URL          : {config['token_url']}")
-    print(f"  Scope              : {config['scope']}")
+    print(f"  Authorization URL  : {chatgpt['authorization_url']}")
+    print(f"  Token URL          : {chatgpt['token_url']}")
+    print(f"  Scope              : {chatgpt['scope']}")
     print()
-    print("--- Extras ---")
-    print(f"  OpenAPI (importar) : {config['openapi_url']}")
-    print(f"  Metadados OAuth    : {config['metadata_url']}")
+    print("  Extras")
+    print(f"    OpenAPI (importar) : {chatgpt['openapi_url']}")
+    print(f"    Metadados OAuth    : {chatgpt['metadata_url']}")
     print()
-    print("=== MCP remoto (Claude Connectors) ===")
-    print()
-    print(f"  Connector URL      : {config['mcp_connector_url']}")
-    print(f"  Metadados MCP      : {config['mcp_metadata_url']}")
-    print()
-    print("No Claude: Settings → Connectors → Add custom connector → cole a Connector URL.")
-    print("OAuth é automático (DCR); não precisa Client ID/Secret manual.")
-    print()
-    print("No ChatGPT: Actions → Authentication → OAuth → cole os valores acima.")
-    print("Token Exchange Method: Default (POST request)")
+    print("  Como configurar")
+    print("    1. Custom GPT → Actions → Create new action")
+    print(f"    2. Schema → Import from URL: {chatgpt['openapi_url']}")
+    print("    3. Authentication → OAuth → cole Client ID, Secret, URLs e Scope acima")
+    print(f"    4. Token Exchange Method: {chatgpt['token_exchange_method']}")
     print()
 
     if not secret:
-        print("Como obter o Client Secret:")
-        print("  1. Render Dashboard → seu serviço → Environment")
-        print("  2. Revele OAUTH_CLIENT_SECRET (ou gere: openssl rand -hex 32)")
-        print("  3. Cole o mesmo valor no ChatGPT e no Render")
+        print("  Client Secret ausente localmente:")
+        print("    1. Render Dashboard → seu serviço → Environment")
+        print("    2. Revele OAUTH_CLIENT_SECRET (ou gere: openssl rand -hex 32)")
+        print("    3. Cole o mesmo valor no ChatGPT e no Render")
         print()
     elif sys.stdout.isatty():
         print(f"  (secret local detectado: {_mask_secret(secret)})")
         print()
+
+    print("=" * 50)
+    print("  Claude (MCP remoto)")
+    print("=" * 50)
+    print()
+    print(f"  Connector URL      : {claude['connector_url']}")
+    print(f"  Metadados MCP      : {claude['metadata_url']}")
+    print(f"  OAuth MCP          : {claude['oauth_mode']}")
+    print()
+    print("  Como configurar")
+    print("    1. Claude → Settings → Connectors → Add custom connector")
+    print(f"    2. Cole a Connector URL: {claude['connector_url']}")
+    print("    3. Conecte e faça login com sua conta P+ (pmais.p4ed.com)")
+    print("    (Não precisa Client ID, Secret nem URLs de token — OAuth é automático.)")
+    print()
+    print(f"  Guia: docs/claude-remote-setup.md")
+    print()
 
 
 def main(argv: list[str] | None = None) -> None:
     _load_dotenv()
 
     parser = argparse.ArgumentParser(
-        description="Mostra configuração OAuth para ChatGPT Actions.",
+        description="Mostra configuração para ChatGPT Actions e Claude MCP remoto.",
     )
     parser.add_argument(
         "base_url",
@@ -159,9 +189,15 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(1) from exc
 
     if args.json:
-        payload = {**config}
-        if not payload["client_secret"]:
-            payload.pop("client_secret")
+        payload: dict[str, object] = {
+            "base_url": config["base_url"],
+            "chatgpt": dict(config["chatgpt"]),  # type: ignore[arg-type]
+            "claude": config["claude"],
+        }
+        chatgpt_json = payload["chatgpt"]
+        assert isinstance(chatgpt_json, dict)
+        if not chatgpt_json.get("client_secret"):
+            chatgpt_json.pop("client_secret", None)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
