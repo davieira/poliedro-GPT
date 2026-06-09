@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Security, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,7 @@ from .api_base import api_base_url
 from .mcp_remote import get_mcp_session_manager, get_mcp_starlette_app, router as mcp_router
 from .oauth_proxy import router as oauth_router
 from .profile_discovery import ProfileChoiceRequired, ProfileDiscoveryError
+from .privacy_policy import privacy_policy_html
 from .user_context import get_service, login_and_build_profile
 
 API_PREFIX = "/api/v1"
@@ -268,7 +269,15 @@ def root() -> dict[str, str]:
         "status": "ok",
         "docs": "/docs",
         "openapi": "/openapi.json",
+        "privacy": "/privacy",
     }
+
+
+@app.get("/privacy", tags=["meta"], response_class=HTMLResponse)
+@app.get("/privacy-policy", tags=["meta"], response_class=HTMLResponse, include_in_schema=False)
+def privacy_policy() -> HTMLResponse:
+    """Política de privacidade pública (exigida para publicar Custom GPT no ChatGPT)."""
+    return HTMLResponse(privacy_policy_html())
 
 
 @app.get("/health", tags=["meta"])

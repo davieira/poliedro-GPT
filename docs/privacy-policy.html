@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Política de Privacidade — Poliedro P+</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f4f6f8; margin: 0; color: #222; line-height: 1.55; }
+    main { max-width: 720px; margin: 32px auto 48px; background: #fff; padding: 32px 36px; border-radius: 12px;
+           box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+    h1 { font-size: 1.5rem; margin: 0 0 8px; }
+    h2 { font-size: 1.1rem; margin: 28px 0 10px; color: #1a5fb4; }
+    p, li { color: #333; }
+    .meta { color: #666; font-size: .9rem; margin-bottom: 24px; }
+    .notice { font-size: .9rem; background: #eef4fc; border: 1px solid #c5d9f0; border-radius: 8px;
+              padding: 12px 14px; margin: 20px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; margin: 12px 0 20px; }
+    th, td { border: 1px solid #dde3ea; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f0f4f8; }
+    a { color: #1a5fb4; }
+    ul { padding-left: 1.25rem; }
+    footer { max-width: 720px; margin: 0 auto 48px; text-align: center; font-size: .8rem; color: #666; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Política de Privacidade</h1>
+    <p class="meta"><strong>Poliedro P+ para ChatGPT / Claude</strong> · Última atualização: 9 de junho de 2026</p>
+
+    <p>Esta política descreve como o serviço <strong>Poliedro P+ para ChatGPT / Claude</strong>
+    (API REST e servidor MCP não oficial, código aberto em
+    <a href="https://github.com/davieira/poliedro-GPT" rel="noopener noreferrer">github.com/davieira/poliedro-GPT</a>)
+    trata informações quando você o utiliza por meio do <strong>ChatGPT</strong> (Custom GPT com Actions),
+    do <strong>Claude</strong> (Custom Connector MCP) ou de instalação <strong>local</strong> (Claude Desktop).</p>
+
+    <div class="notice" role="note">
+      <strong>Importante:</strong> este projeto <strong>não é afiliado</strong> ao Poliedro Sistema de Ensino.
+      O portal oficial P+ está em <a href="https://pmais.p4ed.com/">pmais.p4ed.com</a> e possui seus próprios termos.
+    </div>
+
+    <h2>1. Quem somos</h2>
+    <p>O software é mantido de forma independente por contribuidores do repositório open source <strong>poliedro-GPT</strong>.
+    Quem faz o deploy da API (por exemplo, no Render) atua como operador técnico da instância que você utiliza.</p>
+    <p>Dúvidas: <a href="https://github.com/davieira/poliedro-GPT/issues">GitHub Issues</a>.</p>
+
+    <h2>2. O que o serviço faz</h2>
+    <p>Consulta, em seu nome, dados do portal Poliedro P+: boletim/notas, mensagens e calendário escolar.
+    Você faz login com usuário e senha do P+; a API valida nos servidores do Poliedro e usa um token temporário
+    para buscar os dados solicitados.</p>
+
+    <h2>3. Dados que passam pelo serviço</h2>
+    <table>
+      <thead>
+        <tr><th>Dado</th><th>Armazenado?</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Usuário e senha do P+</td><td><strong>Não</strong> — só no login, depois descartados</td></tr>
+        <tr><td>Token JWT do Poliedro</td><td><strong>Somente em memória</strong> (minutos)</td></tr>
+        <tr><td>Perfil escolar (IDs, matrícula)</td><td><strong>Cache em memória</strong> até 30 min</td></tr>
+        <tr><td>Notas, mensagens, calendário</td><td><strong>Não persistidos</strong> — só na resposta</td></tr>
+        <tr><td>Tokens OAuth (ChatGPT / Claude)</td><td><strong>Somente em memória</strong>, expiração curta</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Não há banco de dados.</strong> Credenciais do P+ não são gravadas em disco ou logs no servidor.</p>
+
+    <h2>4. Uso local (Claude Desktop)</h2>
+    <p>Na instalação local, a senha pode ficar no <strong>Keychain do macOS</strong> — apenas no seu dispositivo,
+    não no servidor remoto.</p>
+
+    <h2>5. Como os dados são usados</h2>
+    <ul>
+      <li>Autenticar você no portal Poliedro P+</li>
+      <li>Atender consultas via ChatGPT, Claude ou cliente local</li>
+      <li>Manter sua sessão OAuth enquanto você usa o assistente</li>
+    </ul>
+    <p>Não vendemos nem usamos seus dados para publicidade ou treinamento de modelos de IA.</p>
+
+    <h2>6. Terceiros</h2>
+    <table>
+      <thead>
+        <tr><th>Terceiro</th><th>Papel</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><a href="https://pmais.p4ed.com/">Poliedro / P+</a></td><td>Autenticação e dados escolares</td></tr>
+        <tr><td><a href="https://openai.com/policies/privacy-policy">OpenAI (ChatGPT)</a></td><td>Interface e processamento do chat</td></tr>
+        <tr><td><a href="https://www.anthropic.com/privacy">Anthropic (Claude)</a></td><td>Interface do conector MCP</td></tr>
+        <tr><td>Render (hospedagem)</td><td>Infraestrutura da API</td></tr>
+      </tbody>
+    </table>
+
+    <h2>7. Retenção e segurança</h2>
+    <p>Senhas não são retidas. Cache e tokens em memória expiram ou se perdem ao reiniciar o servidor.
+    Comunicação em HTTPS em produção. Cada usuário acessa apenas os próprios dados do P+.</p>
+
+    <h2>8. Crianças e adolescentes</h2>
+    <p>O serviço pode exibir dados escolares de menores (notas, mensagens, calendário).
+    O acesso deve ser por pais, responsáveis ou o aluno com credenciais válidas do P+.</p>
+
+    <h2>9. Seus direitos (LGPD)</h2>
+    <p>Você pode solicitar esclarecimentos via
+    <a href="https://github.com/davieira/poliedro-GPT/issues">GitHub Issues</a>.
+    Para cessar o tratamento, <strong>desconecte</strong> o Custom GPT ou conector Claude.
+    Como não há banco de dados, exclusão adicional deve ser solicitada ao Poliedro e à OpenAI/Anthropic,
+    conforme as políticas deles.</p>
+
+    <h2>10. Alterações</h2>
+    <p>Esta página pode ser atualizada. A data no topo indica a versão vigente.</p>
+
+    <h2>Resumo</h2>
+    <table>
+      <tbody>
+        <tr><td>Guardamos sua senha do P+?</td><td><strong>Não</strong></td></tr>
+        <tr><td>Temos banco de dados?</td><td><strong>Não</strong></td></tr>
+        <tr><td>Como parar?</td><td>Desconecte o GPT/conector no ChatGPT ou Claude</td></tr>
+      </tbody>
+    </table>
+  </main>
+  <footer>
+    Projeto open source não oficial ·
+    <a href="https://github.com/davieira/poliedro-GPT/blob/main/LICENSE">MIT License</a>
+  </footer>
+</body>
+</html>

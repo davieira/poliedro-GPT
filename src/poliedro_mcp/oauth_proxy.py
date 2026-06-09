@@ -176,6 +176,7 @@ def _login_html(
       <strong>Privacidade:</strong> suas credenciais são usadas apenas para autenticar
       diretamente nos servidores do Poliedro (P+). Elas <strong>não são armazenadas</strong>
       neste serviço — nem em disco, banco de dados ou logs — em hipótese alguma.
+      <a href="/privacy">Política de privacidade</a>
     </div>
     {error_block}
     <form method="post" action="{html.escape(form_action)}">
@@ -192,8 +193,7 @@ def _login_html(
       <button type="submit">Entrar</button>
     </form>
   </main>
-  <footer>
-    Projeto open source não oficial </footer>
+  <footer>Projeto open source não oficial </footer>
 </body>
 </html>"""
 

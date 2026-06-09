@@ -59,6 +59,14 @@ https://SEU-APP.onrender.com/openapi.json
 
 5. **Salve o GPT** e copie o **Callback URL** que aparece em Actions (formato `https://chatgpt.com/aip/g-.../oauth/callback`).
 
+6. Para **publicar** o GPT na loja, preencha a **Privacy policy URL**:
+
+```
+https://SEU-APP.onrender.com/privacy
+```
+
+Texto completo também em [docs/privacy-policy.md](privacy-policy.md) e no GitHub.
+
 O callback do ChatGPT já é aceito por padrão. Só altere `OAUTH_ALLOWED_REDIRECT_PREFIXES` se usar outro domínio.
 
 ## Passo 3 — Instruções do GPT

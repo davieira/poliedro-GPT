@@ -1,8 +1,8 @@
-# Poliedro API & MCP
+# Poliedro P+ para CLaude ou ChatGPT
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-API REST e servidor MCP **não oficial** para consultar notas, mensagens e calendário do portal [Poliedro P+](https://pmais.p4ed.com/).
+API REST e servidor MCP **não oficial** para consultar notas, mensagens e calendário do portal [Poliedro P+](https://pmais.p4ed.com/) através do Claude ou ChatGPT.
 
 > Este projeto **não é afiliado** ao Poliedro Sistema de Ensino. Código aberto — use por sua conta e risco, respeitando os termos do portal P+.
 
@@ -11,7 +11,7 @@ API REST e servidor MCP **não oficial** para consultar notas, mensagens e calen
 - Boletim / notas
 - Mensagens e notificações
 - Calendário escolar (próximos eventos, semana, mês, ano)
-- Integração com **ChatGPT** (Actions + OAuth manual)
+- Integração com **ChatGPT** (Actions + OAuth)
 - Integração com **Claude** (MCP remoto via Custom Connector — recomendado — ou MCP local no Desktop)
 
 ## Integrações
@@ -78,6 +78,8 @@ python print_oauth_config.py https://SEU-APP.onrender.com
 5. Importe o schema: `https://SEU-APP.onrender.com/openapi.json`
 
 O **Scope** não é seu e-mail — são permissões padrão OAuth (`openid`, `profile`, `email`).
+
+**Publicar o GPT:** use `https://SEU-APP.onrender.com/privacy` como Privacy policy URL.
 
 ## Claude — MCP remoto (recomendado)
 
