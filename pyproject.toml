@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 poliedro-api = "poliedro_mcp.api:run"
+poliedro-oauth-config = "poliedro_mcp.oauth_config:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

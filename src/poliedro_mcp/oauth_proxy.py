@@ -25,6 +25,7 @@ DEFAULT_REDIRECT_PREFIXES = (
     "https://chatgpt.com/aip/",
     "https://chat.openai.com/aip/",
 )
+GITHUB_REPO_URL = "https://github.com/davieira/poliedro-GPT"
 
 
 @dataclass
@@ -143,6 +144,11 @@ def _login_html(
               color: #fff; font-size: 1rem; cursor: pointer; }}
     .error {{ color: #b00020; }}
     .hint {{ font-size: .85rem; color: #666; }}
+    .notice {{ font-size: .85rem; color: #333; background: #eef4fc; border: 1px solid #c5d9f0;
+               border-radius: 8px; padding: 12px 14px; margin-bottom: 20px; line-height: 1.45; }}
+    .notice strong {{ color: #1a5fb4; }}
+    footer {{ max-width: 420px; margin: 16px auto 48px; text-align: center; font-size: .8rem; color: #666; }}
+    footer a {{ color: #1a5fb4; }}
     ul {{ font-size: .85rem; }}
   </style>
 </head>
@@ -150,6 +156,11 @@ def _login_html(
   <main>
     <h1>Poliedro P+</h1>
     <p>Use o mesmo usuário e senha do portal <strong>pmais.p4ed.com</strong>.</p>
+    <div class="notice" role="note">
+      <strong>Privacidade:</strong> suas credenciais são usadas apenas para autenticar
+      diretamente nos servidores do Poliedro (P+). Elas <strong>não são armazenadas</strong>
+      neste serviço — nem em disco, banco de dados ou logs — em hipótese alguma.
+    </div>
     {error_block}
     <form method="post" action="/oauth/authorize">
       <input type="hidden" name="client_id" value="{html.escape(client_id)}">
@@ -165,10 +176,14 @@ def _login_html(
       <input id="school_id" name="school_id" inputmode="numeric" placeholder="Somente se solicitado">
       <label for="dependent_id">ID do dependente (opcional)</label>
       <input id="dependent_id" name="dependent_id" inputmode="numeric" placeholder="Contas de responsável">
-      <p class="hint">Usuário sem @p4ed.com. A senha não é armazenada neste servidor.</p>
+      <p class="hint">Usuário sem @p4ed.com.</p>
       <button type="submit">Entrar</button>
     </form>
   </main>
+  <footer>
+    Projeto open source não oficial —
+    <a href="{html.escape(GITHUB_REPO_URL)}" target="_blank" rel="noopener noreferrer">poliedro-GPT no GitHub</a>
+  </footer>
 </body>
 </html>"""
 

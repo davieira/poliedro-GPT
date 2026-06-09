@@ -17,11 +17,23 @@ Não é necessário `POLIEDRO_TOKEN` nem `POLIEDRO_CONFIG_JSON` no modo OAuth.
 
 ## Passo 1 — Deploy
 
-Após o deploy, confira:
+Após o deploy, gere os valores OAuth:
+
+```bash
+# Na raiz do repo (poliedro-GPT/, não dentro de scripts/)
+python print_oauth_config.py https://SEU-APP.onrender.com
+```
+
+Com o secret local (ex.: exportado do Render):
+
+```bash
+OAUTH_CLIENT_SECRET=seu-secret python print_oauth_config.py https://SEU-APP.onrender.com
+```
+
+Confira também:
 
 ```bash
 curl -s https://SEU-APP.onrender.com/health
-curl -s https://SEU-APP.onrender.com/.well-known/oauth-authorization-server | jq
 ```
 
 ## Passo 2 — Criar o Custom GPT
