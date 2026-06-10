@@ -21,11 +21,24 @@ def reset_request_base_url(token: Token[str | None]) -> None:
     _request_base_url.reset(token)
 
 
+def configured_api_base_url() -> str:
+    """
+    URL estável para inicializar OAuth/MCP (lifespan, singleton do servidor).
+
+    Não usa o Host da requisição — evita recriar o MCP mid-flight e quebrar o task group.
+    """
+    configured = os.getenv("API_BASE_URL", "").strip().rstrip("/")
+    if configured:
+        return configured
+
+    return DEFAULT_API_BASE_URL
+
+
 def api_base_url() -> str:
     """
-    URL pública da API para metadados OAuth/MCP e OpenAPI.
+    URL pública efetiva para metadados OAuth/MCP e OpenAPI.
 
-    Prioridade: API_BASE_URL → Host da requisição → RENDER_EXTERNAL_URL → default.
+    Prioridade: API_BASE_URL → Host da requisição → default.
     """
     configured = os.getenv("API_BASE_URL", "").strip().rstrip("/")
     if configured:
@@ -35,12 +48,9 @@ def api_base_url() -> str:
     if from_request:
         return from_request
 
-    render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
-    if render_url:
-        return render_url
-
     return DEFAULT_API_BASE_URL
 
 
-def mcp_base_url() -> str:
-    return f"{api_base_url()}/mcp"
+def mcp_base_url(*, stable: bool = False) -> str:
+    base = configured_api_base_url() if stable else api_base_url()
+    return f"{base}/mcp"

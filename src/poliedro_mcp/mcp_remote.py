@@ -16,7 +16,7 @@ from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.responses import Response as StarletteResponse
 
-from .api_base import api_base_url, mcp_base_url
+from .api_base import DEFAULT_API_BASE_URL, api_base_url, configured_api_base_url
 from .auth import LoginError, login_with_password
 from .logger import logger
 from .mcp_auth_provider import get_mcp_auth_provider
@@ -29,7 +29,6 @@ router = APIRouter(tags=["mcp"])
 
 _mcp_server: FastMCP | None = None
 _mcp_starlette: Starlette | None = None
-_mcp_server_base_url: str | None = None
 
 
 class _MCPSubAppResponse(StarletteResponse):
@@ -54,13 +53,14 @@ def _parse_optional_int(value: str | None) -> int | None:
 
 
 def _mcp_transport_security() -> TransportSecuritySettings:
-    """Permite Host do domínio público (Render, custom domain, localhost)."""
+    """Permite Host do domínio público (custom domain, Render, localhost)."""
     hosts: set[str] = set()
     for key in ("API_BASE_URL", "RENDER_EXTERNAL_URL"):
         url = os.getenv(key, "").strip()
         if url:
             hosts.add(urlparse(url).netloc)
-    hosts.add(urlparse(api_base_url()).netloc)
+    for base in (configured_api_base_url(), api_base_url(), DEFAULT_API_BASE_URL):
+        hosts.add(urlparse(base).netloc)
     allowed = [h for host in hosts if host for h in (host, f"{host}:*")]
     allowed.extend(["localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*"])
     return TransportSecuritySettings(
@@ -70,13 +70,13 @@ def _mcp_transport_security() -> TransportSecuritySettings:
 
 
 def create_mcp_server() -> FastMCP:
-    global _mcp_server, _mcp_starlette, _mcp_server_base_url
-    base = api_base_url()
-    if _mcp_server is not None and _mcp_server_base_url == base:
+    global _mcp_server, _mcp_starlette
+    if _mcp_server is not None:
         return _mcp_server
 
     provider = get_mcp_auth_provider()
-    issuer = AnyHttpUrl(mcp_base_url())
+    base = configured_api_base_url()
+    issuer = AnyHttpUrl(f"{base}/mcp")
 
     mcp = FastMCP(
         name="poliedro-mcp",
@@ -93,7 +93,7 @@ def create_mcp_server() -> FastMCP:
         auth=AuthSettings(
             issuer_url=issuer,
             resource_server_url=issuer,
-            service_documentation_url=AnyHttpUrl(f"{api_base_url()}/docs"),
+            service_documentation_url=AnyHttpUrl(f"{base}/docs"),
             required_scopes=["openid"],
             client_registration_options=_mcp_client_registration_options(),
         ),
@@ -101,7 +101,6 @@ def create_mcp_server() -> FastMCP:
     register_tools(mcp)
     _mcp_server = mcp
     _mcp_starlette = mcp.streamable_http_app()
-    _mcp_server_base_url = base
     return mcp
 
 
@@ -123,12 +122,12 @@ def _mcp_client_registration_options() -> ClientRegistrationOptions:
     )
 
 
-def _mcp_oauth_metadata_handler() -> MetadataHandler:
+def _mcp_oauth_metadata_handler(base_url: str) -> MetadataHandler:
     """Metadados OAuth do MCP (RFC 8414 path-aware + registration_endpoint)."""
-    issuer = AnyHttpUrl(mcp_base_url())
+    issuer = AnyHttpUrl(f"{base_url}/mcp")
     metadata = build_metadata(
         issuer_url=issuer,
-        service_documentation_url=AnyHttpUrl(f"{api_base_url()}/docs"),
+        service_documentation_url=AnyHttpUrl(f"{base_url}/docs"),
         client_registration_options=_mcp_client_registration_options(),
         revocation_options=RevocationOptions(),
     )
@@ -147,13 +146,13 @@ def _mcp_oauth_metadata_handler() -> MetadataHandler:
 @router.get("/.well-known/oauth-authorization-server/mcp")
 async def mcp_oauth_metadata_rfc8414(request: Request) -> Response:
     """RFC 8414 — metadados do issuer /mcp na raiz do site (exigido pelo Claude)."""
-    return await _mcp_oauth_metadata_handler().handle(request)
+    return await _mcp_oauth_metadata_handler(api_base_url()).handle(request)
 
 
 @router.get("/.well-known/openid-configuration/mcp")
 async def mcp_openid_metadata_rfc8414(request: Request) -> Response:
     """Fallback OIDC discovery (RFC 8414 §5) para conectores MCP."""
-    return await _mcp_oauth_metadata_handler().handle(request)
+    return await _mcp_oauth_metadata_handler(api_base_url()).handle(request)
 
 
 @router.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"])
@@ -170,13 +169,14 @@ async def mcp_entry_no_trailing_slash(request: Request) -> _MCPSubAppResponse:
 @router.get("/.well-known/oauth-protected-resource/mcp")
 async def mcp_protected_resource_metadata(request: Request) -> Response:
     """RFC 9728 — metadados na raiz do site (exigido por conectores Claude)."""
-    resource_url = AnyHttpUrl(mcp_base_url())
+    base = api_base_url()
+    resource_url = AnyHttpUrl(f"{base}/mcp")
     handler = ProtectedResourceMetadataHandler(
         ProtectedResourceMetadata(
             resource=resource_url,
             authorization_servers=[resource_url],
             scopes_supported=["openid"],
-            resource_documentation=AnyHttpUrl(f"{api_base_url()}/docs"),
+            resource_documentation=AnyHttpUrl(f"{base}/docs"),
         )
     )
     return await handler.handle(request)
