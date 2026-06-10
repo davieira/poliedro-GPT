@@ -207,6 +207,18 @@ app = FastAPI(
 )
 
 
+def _chatgpt_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """ChatGPT Actions exige type=object com properties explícitas."""
+    if "$ref" in schema:
+        return schema
+    if schema.get("type") == "object":
+        fixed = dict(schema)
+        fixed.setdefault("properties", {})
+        fixed.pop("additionalProperties", None)
+        return fixed
+    return {"type": "object", "properties": {}}
+
+
 def custom_openapi() -> dict[str, Any]:
     if app.openapi_schema:
         return app.openapi_schema
@@ -224,10 +236,10 @@ def custom_openapi() -> dict[str, Any]:
     schema["paths"] = {
         path: methods
         for path, methods in schema.get("paths", {}).items()
-        if path.startswith(API_PREFIX)
+        if path.startswith(API_PREFIX) and path != f"{API_PREFIX}/auth/login"
     }
-    components = schema.setdefault("components", {}).setdefault("securitySchemes", {})
-    components["OAuth2"] = {
+
+    oauth2 = {
         "type": "oauth2",
         "flows": {
             "authorizationCode": {
@@ -241,12 +253,16 @@ def custom_openapi() -> dict[str, Any]:
             }
         },
     }
+    schema.setdefault("components", {})["securitySchemes"] = {"OAuth2": oauth2}
+    schema["security"] = [{"OAuth2": ["openid", "profile", "email"]}]
 
-    for path, methods in schema.get("paths", {}).items():
-        if not path.startswith(API_PREFIX):
-            continue
+    for methods in schema.get("paths", {}).values():
         for operation in methods.values():
             operation["security"] = [{"OAuth2": ["openid", "profile", "email"]}]
+            for response in operation.get("responses", {}).values():
+                json_content = response.get("content", {}).get("application/json")
+                if json_content and "schema" in json_content:
+                    json_content["schema"] = _chatgpt_json_schema(json_content["schema"])
 
     app.openapi_schema = schema
     return schema
@@ -300,7 +316,7 @@ def public_health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post(f"{API_PREFIX}/auth/login", tags=["auth"])
+@app.post(f"{API_PREFIX}/auth/login", tags=["auth"], include_in_schema=False)
 def auth_login(
     body: LoginRequest,
     _: None = Depends(verify_api_key),
