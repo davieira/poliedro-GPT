@@ -25,7 +25,7 @@ from .oauth_proxy import GITHUB_REPO_URL, _login_html
 from .profile_discovery import ProfileChoiceRequired, discover_profile_config
 from .user_context import get_base_config
 
-router = APIRouter(tags=["mcp"])
+router = APIRouter(tags=["mcp"], include_in_schema=False)
 
 _mcp_server: FastMCP | None = None
 _mcp_starlette: Starlette | None = None

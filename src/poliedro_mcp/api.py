@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from .auth import LoginError
 from .logger import logger
-from .api_base import api_base_url, bind_request_base_url_from_request, reset_request_base_url
+from .api_base import api_base_url, bind_request_base_url_from_request, configured_api_base_url, reset_request_base_url
 from .mcp_remote import get_mcp_session_manager, get_mcp_starlette_app, router as mcp_router
 from .oauth_proxy import router as oauth_router
 from .profile_discovery import ProfileChoiceRequired, ProfileDiscoveryError
@@ -219,9 +219,14 @@ def custom_openapi() -> dict[str, Any]:
         description=app.description,
         routes=app.routes,
     )
-    schema["servers"] = [{"url": api_base_url()}]
+    base = configured_api_base_url()
+    schema["servers"] = [{"url": base}]
+    schema["paths"] = {
+        path: methods
+        for path, methods in schema.get("paths", {}).items()
+        if path.startswith(API_PREFIX)
+    }
     components = schema.setdefault("components", {}).setdefault("securitySchemes", {})
-    base = api_base_url()
     components["OAuth2"] = {
         "type": "oauth2",
         "flows": {
