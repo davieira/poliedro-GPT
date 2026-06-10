@@ -73,7 +73,7 @@ python print_oauth_config.py https://poliedro-api.iden.is
 | Client Secret | mesmo do Render |
 | Authorization URL | `https://poliedro-api.iden.is/oauth/authorize` |
 | Token URL | `https://poliedro-api.iden.is/oauth/token` |
-| Scope | `openid profile email` |
+| Scope | `openid profile email` — **não** use seu e-mail aqui |
 
 5. Importe o schema: `https://poliedro-api.iden.is/openapi.json`
 

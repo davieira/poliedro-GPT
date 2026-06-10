@@ -54,7 +54,7 @@ https://poliedro-api.iden.is/openapi.json
 | Client Secret | mesmo valor de `OAUTH_CLIENT_SECRET` no Render |
 | Authorization URL | `https://poliedro-api.iden.is/oauth/authorize` |
 | Token URL | `https://poliedro-api.iden.is/oauth/token` |
-| Scope | `openid profile email` |
+| Scope | `openid profile email` — **não** use seu e-mail aqui |
 | Token Exchange Method | Default (POST request) |
 
 5. **Salve o GPT** e copie o **Callback URL** que aparece em Actions (formato `https://chatgpt.com/aip/g-.../oauth/callback`).

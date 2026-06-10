@@ -45,6 +45,13 @@ def _oauth_client_id() -> str:
     return os.getenv("OAUTH_CLIENT_ID", "poliedro-gpt").strip()
 
 
+def _effective_client_id(client_id: str | None) -> str:
+    """ChatGPT às vezes omite client_id na URL de authorize — usa o padrão do servidor."""
+    if client_id and client_id.strip():
+        return client_id.strip()
+    return _oauth_client_id()
+
+
 def _oauth_client_secret() -> str:
     secret = os.getenv("OAUTH_CLIENT_SECRET", "").strip()
     if not secret:
@@ -82,12 +89,14 @@ def _validate_redirect_uri(redirect_uri: str) -> None:
         )
 
 
-def _validate_client_id(client_id: str) -> None:
-    if not secrets.compare_digest(client_id, _oauth_client_id()):
+def _validate_client_id(client_id: str | None) -> str:
+    effective = _effective_client_id(client_id)
+    if not secrets.compare_digest(effective, _oauth_client_id()):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="client_id inválido.",
         )
+    return effective
 
 
 def _validate_client_secret(client_secret: str) -> None:
@@ -241,10 +250,10 @@ def _parse_optional_int(value: str | None) -> int | None:
 
 @router.get("/oauth/authorize")
 def oauth_authorize_get(
-    client_id: str = Query(...),
     redirect_uri: str = Query(...),
     state: str = Query(...),
     response_type: str = Query(default="code"),
+    client_id: str = Query(default=""),
     scope: str | None = Query(default=None),
 ) -> HTMLResponse:
     """Inicia o fluxo OAuth (ChatGPT) e exibe o formulário de login P+."""
@@ -253,12 +262,12 @@ def oauth_authorize_get(
     if not state:
         raise HTTPException(status_code=400, detail="state é obrigatório.")
 
-    _validate_client_id(client_id)
+    effective_client_id = _validate_client_id(client_id)
     _validate_redirect_uri(redirect_uri)
 
     return HTMLResponse(
         _login_html(
-            client_id=client_id,
+            client_id=effective_client_id,
             redirect_uri=redirect_uri,
             state=state,
             response_type=response_type,
@@ -280,7 +289,7 @@ def oauth_authorize_post(
     dependent_id: str | None = Form(default=None),
 ) -> Response:
     """Valida credenciais P+ e redireciona de volta ao ChatGPT com authorization code."""
-    _validate_client_id(client_id)
+    effective_client_id = _validate_client_id(client_id)
     _validate_redirect_uri(redirect_uri)
 
     if response_type != "code":
@@ -296,7 +305,7 @@ def oauth_authorize_post(
     except LoginError as exc:
         return HTMLResponse(
             _login_html(
-                client_id=client_id,
+                client_id=effective_client_id,
                 redirect_uri=redirect_uri,
                 state=state,
                 response_type=response_type,
@@ -323,7 +332,7 @@ def oauth_authorize_post(
     except ProfileChoiceRequired as exc:
         return HTMLResponse(
             _login_html(
-                client_id=client_id,
+                client_id=effective_client_id,
                 redirect_uri=redirect_uri,
                 state=state,
                 response_type=response_type,
@@ -335,7 +344,7 @@ def oauth_authorize_post(
     except Exception as exc:
         return HTMLResponse(
             _login_html(
-                client_id=client_id,
+                client_id=effective_client_id,
                 redirect_uri=redirect_uri,
                 state=state,
                 response_type=response_type,
@@ -350,7 +359,7 @@ def oauth_authorize_post(
         refresh_token=refresh_token,
         expires_in=expires_in,
         redirect_uri=redirect_uri,
-        client_id=client_id,
+        client_id=effective_client_id,
     )
 
     logger.info("OAuth login concluído para usuário=%s", username.strip())
@@ -369,10 +378,9 @@ async def oauth_token(request: Request) -> JSONResponse:
         body = dict(await request.form())
 
     grant_type = str(body.get("grant_type", "")).strip()
-    client_id = str(body.get("client_id", "")).strip()
     client_secret = str(body.get("client_secret", "")).strip()
 
-    _validate_client_id(client_id)
+    _validate_client_id(body.get("client_id"))
     _validate_client_secret(client_secret)
 
     if grant_type == "authorization_code":
