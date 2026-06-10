@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import html
 import os
 import secrets
@@ -106,6 +107,30 @@ def _validate_client_secret(client_secret: str) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="client_secret inválido.",
         )
+
+
+def _extract_client_credentials(request: Request, body: dict[str, Any]) -> tuple[str, str]:
+    """
+    Lê client_id/client_secret do body (client_secret_post) ou Authorization: Basic.
+
+    O ChatGPT Actions costuma usar client_secret_basic mesmo quando o schema declara post.
+    """
+    client_id = str(body.get("client_id", "")).strip()
+    client_secret = str(body.get("client_secret", "")).strip()
+
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("basic "):
+        try:
+            decoded = base64.b64decode(auth_header[6:].strip(), validate=True).decode("utf-8")
+            basic_id, _, basic_secret = decoded.partition(":")
+            if not client_id:
+                client_id = basic_id.strip()
+            if not client_secret:
+                client_secret = basic_secret.strip()
+        except (ValueError, UnicodeDecodeError):
+            logger.warning("OAuth token: Authorization Basic inválido")
+
+    return client_id, client_secret
 
 
 def _login_html(
@@ -378,9 +403,9 @@ async def oauth_token(request: Request) -> JSONResponse:
         body = dict(await request.form())
 
     grant_type = str(body.get("grant_type", "")).strip()
-    client_secret = str(body.get("client_secret", "")).strip()
+    client_id, client_secret = _extract_client_credentials(request, body)
 
-    _validate_client_id(body.get("client_id"))
+    _validate_client_id(client_id)
     _validate_client_secret(client_secret)
 
     if grant_type == "authorization_code":
@@ -463,5 +488,5 @@ def oauth_metadata(request: Request) -> dict[str, Any]:
         "token_endpoint": f"{base}/oauth/token",
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
-        "token_endpoint_auth_methods_supported": ["client_secret_post"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
     }
