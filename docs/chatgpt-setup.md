@@ -11,7 +11,7 @@ Este guia conecta um **Custom GPT** à API no Render com **login por usuário** 
 |----------|-------------|---------|
 | `OAUTH_CLIENT_SECRET` | Sim | gere com `openssl rand -hex 32` |
 | `OAUTH_CLIENT_ID` | Não | padrão: `poliedro-gpt` |
-| `API_BASE_URL` | Recomendado | `https://api.iden.is` |
+| `API_BASE_URL` | Recomendado | `https://poliedro-api.iden.is` |
 
 Não é necessário `POLIEDRO_TOKEN` nem `POLIEDRO_CONFIG_JSON` no modo OAuth.
 
@@ -21,19 +21,19 @@ Após o deploy, gere os valores OAuth:
 
 ```bash
 # Na raiz do repo (poliedro-GPT/, não dentro de scripts/)
-python print_oauth_config.py https://api.iden.is
+python print_oauth_config.py https://poliedro-api.iden.is
 ```
 
 Com o secret local (ex.: exportado do Render):
 
 ```bash
-OAUTH_CLIENT_SECRET=seu-secret python print_oauth_config.py https://api.iden.is
+OAUTH_CLIENT_SECRET=seu-secret python print_oauth_config.py https://poliedro-api.iden.is
 ```
 
 Confira também:
 
 ```bash
-curl -s https://api.iden.is/health
+curl -s https://poliedro-api.iden.is/health
 ```
 
 ## Passo 2 — Criar o Custom GPT
@@ -43,7 +43,7 @@ curl -s https://api.iden.is/health
 3. **Schema → Import from URL:**
 
 ```
-https://api.iden.is/openapi.json
+https://poliedro-api.iden.is/openapi.json
 ```
 
 4. Em **Authentication**, escolha **OAuth** e preencha:
@@ -52,8 +52,8 @@ https://api.iden.is/openapi.json
 |-------|--------|
 | Client ID | `poliedro-gpt` (ou seu `OAUTH_CLIENT_ID`) |
 | Client Secret | mesmo valor de `OAUTH_CLIENT_SECRET` no Render |
-| Authorization URL | `https://api.iden.is/oauth/authorize` |
-| Token URL | `https://api.iden.is/oauth/token` |
+| Authorization URL | `https://poliedro-api.iden.is/oauth/authorize` |
+| Token URL | `https://poliedro-api.iden.is/oauth/token` |
 | Scope | `openid profile email` |
 | Token Exchange Method | Default (POST request) |
 
@@ -62,7 +62,7 @@ https://api.iden.is/openapi.json
 6. Para **publicar** o GPT na loja, preencha a **Privacy policy URL**:
 
 ```
-https://api.iden.is/privacy
+https://poliedro-api.iden.is/privacy
 ```
 
 Texto completo também em [docs/privacy-policy.md](privacy-policy.md) e no GitHub.
@@ -123,13 +123,13 @@ Veja README, seção "Modo single-user".
 
 ```bash
 # Simular abertura da tela de login (abra a URL no navegador)
-open "https://api.iden.is/oauth/authorize?client_id=poliedro-gpt&response_type=code&redirect_uri=https%3A%2F%2Fchatgpt.com%2Faip%2Fg-test%2Foauth%2Fcallback&state=xyz&scope=openid%20profile%20email"
+open "https://poliedro-api.iden.is/oauth/authorize?client_id=poliedro-gpt&response_type=code&redirect_uri=https%3A%2F%2Fchatgpt.com%2Faip%2Fg-test%2Foauth%2Fcallback&state=xyz&scope=openid%20profile%20email"
 ```
 
 Após login, troque o `code` retornado:
 
 ```bash
-curl -s -X POST https://api.iden.is/oauth/token \
+curl -s -X POST https://poliedro-api.iden.is/oauth/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=authorization_code" \
   -d "client_id=poliedro-gpt" \
@@ -141,6 +141,6 @@ curl -s -X POST https://api.iden.is/oauth/token \
 Use o `access_token` nas chamadas:
 
 ```bash
-curl -s https://api.iden.is/api/v1/grades \
+curl -s https://poliedro-api.iden.is/api/v1/grades \
   -H "Authorization: Bearer TOKEN"
 ```

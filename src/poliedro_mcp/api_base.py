@@ -8,7 +8,7 @@ def api_base_url() -> str:
         url = os.getenv(key, "").strip().rstrip("/")
         if url:
             return url
-    return "https://api.iden.is"
+    return "https://poliedro-api.iden.is"
 
 
 def mcp_base_url() -> str:

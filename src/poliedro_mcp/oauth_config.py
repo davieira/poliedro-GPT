@@ -172,7 +172,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "base_url",
         nargs="?",
-        help="URL da API (ex.: https://api.iden.is)",
+        help="URL da API (ex.: https://poliedro-api.iden.is)",
     )
     parser.add_argument(
         "--json",
