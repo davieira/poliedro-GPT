@@ -18,7 +18,7 @@ API REST e servidor MCP **não oficial** para consultar notas, mensagens e calen
 
 | Cliente | Como conectar | OAuth |
 |---------|---------------|-------|
-| **Claude** (web/app) | Custom Connector → `https://SEU-APP.onrender.com/mcp` | Automático (DCR) — só login P+ |
+| **Claude** (web/app) | Custom Connector → `https://api.iden.is/mcp` | Automático (DCR) — só login P+ |
 | **ChatGPT** | Custom GPT → Actions + `openapi.json` | Manual (Client ID/Secret) |
 | **Claude Desktop** | MCP local (`python -m poliedro_mcp.server`) | Keychain no Mac |
 
@@ -62,7 +62,7 @@ O login autentica **diretamente nos servidores do Poliedro**. Este projeto atua 
 3. Gere os valores OAuth:
 
 ```bash
-python print_oauth_config.py https://SEU-APP.onrender.com
+python print_oauth_config.py https://api.iden.is
 ```
 
 4. No Custom GPT → **Actions → Authentication → OAuth**:
@@ -71,15 +71,15 @@ python print_oauth_config.py https://SEU-APP.onrender.com
 |-------|--------|
 | Client ID | `poliedro-gpt` |
 | Client Secret | mesmo do Render |
-| Authorization URL | `https://SEU-APP.onrender.com/oauth/authorize` |
-| Token URL | `https://SEU-APP.onrender.com/oauth/token` |
+| Authorization URL | `https://api.iden.is/oauth/authorize` |
+| Token URL | `https://api.iden.is/oauth/token` |
 | Scope | `openid profile email` |
 
-5. Importe o schema: `https://SEU-APP.onrender.com/openapi.json`
+5. Importe o schema: `https://api.iden.is/openapi.json`
 
 O **Scope** não é seu e-mail — são permissões padrão OAuth (`openid`, `profile`, `email`).
 
-**Publicar o GPT:** use `https://SEU-APP.onrender.com/privacy` como Privacy policy URL.
+**Publicar o GPT:** use `https://api.iden.is/privacy` como Privacy policy URL.
 
 ## Claude — MCP remoto (recomendado)
 
@@ -89,11 +89,11 @@ Funciona no **Claude web e app** via Custom Connectors — sem instalar nada no 
 2. Confira a URL do conector:
 
 ```bash
-python print_oauth_config.py https://SEU-APP.onrender.com
+python print_oauth_config.py https://api.iden.is
 ```
 
 3. No Claude → **Settings → Connectors → Add custom connector**
-4. **Connector URL:** `https://SEU-APP.onrender.com/mcp`
+4. **Connector URL:** `https://api.iden.is/mcp`
 5. Conecte → faça login com usuário e senha do P+ (usuário **sem** `@p4ed.com`)
 6. Se tiver várias escolas ou dependentes, preencha na tela de login
 

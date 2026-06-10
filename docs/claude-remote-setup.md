@@ -10,13 +10,13 @@ Use o Poliedro MCP na nuvem, sem instalar nada no Mac. Funciona em **Claude** (w
 ## URL do conector
 
 ```
-https://SEU-APP.onrender.com/mcp
+https://api.iden.is/mcp
 ```
 
 Para conferir após o deploy:
 
 ```bash
-python print_oauth_config.py https://SEU-APP.onrender.com
+python print_oauth_config.py https://api.iden.is
 ```
 
 A seção **MCP remoto (Claude Connectors)** mostra a URL exata.
@@ -25,7 +25,7 @@ A seção **MCP remoto (Claude Connectors)** mostra a URL exata.
 
 1. Abra **Settings** → **Connectors** (ou **Integrations**)
 2. **Add custom connector**
-3. Cole a **Connector URL**: `https://SEU-APP.onrender.com/mcp`
+3. Cole a **Connector URL**: `https://api.iden.is/mcp`
 4. Salve e conecte — o Claude abre o fluxo OAuth automaticamente
 5. Faça login com **usuário e senha do P+** (`pmais.p4ed.com`)
 6. Se tiver várias escolas/dependentes, escolha na tela de login
@@ -70,13 +70,13 @@ Geralmente o callback do Claude truncava o `code` OAuth por ser grande demais (>
 O Claude descobre OAuth em `/.well-known/oauth-authorization-server/mcp` (não em `/mcp/.well-known/...`). Confirme que responde com `registration_endpoint`:
 
 ```bash
-curl -s https://SEU-APP.onrender.com/.well-known/oauth-authorization-server/mcp
+curl -s https://api.iden.is/.well-known/oauth-authorization-server/mcp
 ```
 
 **Conector não conecta**
 
-- Confirme que a API responde: `curl https://SEU-APP.onrender.com/health`
-- Metadados MCP: `curl https://SEU-APP.onrender.com/.well-known/oauth-protected-resource/mcp`
+- Confirme que a API responde: `curl https://api.iden.is/health`
+- Metadados MCP: `curl https://api.iden.is/.well-known/oauth-protected-resource/mcp`
 
 **Login expirou**
 
