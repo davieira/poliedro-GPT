@@ -6,7 +6,7 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from .auth import LoginError
 from .logger import logger
-from .api_base import api_base_url
+from .api_base import api_base_url, bind_request_base_url_from_request, reset_request_base_url
 from .mcp_remote import get_mcp_session_manager, get_mcp_starlette_app, router as mcp_router
 from .oauth_proxy import router as oauth_router
 from .profile_discovery import ProfileChoiceRequired, ProfileDiscoveryError
@@ -259,6 +259,16 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def use_request_public_base_url(request: Request, call_next):
+    """Metadados OAuth/MCP usam o Host da requisição (ex.: domínio customizado)."""
+    token = bind_request_base_url_from_request(request)
+    try:
+        return await call_next(request)
+    finally:
+        reset_request_base_url(token)
 
 
 @app.get("/", tags=["meta"])

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 from urllib.parse import urlparse
 
@@ -13,6 +14,7 @@ from mcp.shared.auth import ProtectedResourceMetadata
 from mcp.server.fastmcp import FastMCP
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
+from starlette.responses import Response as StarletteResponse
 
 from .api_base import api_base_url, mcp_base_url
 from .auth import LoginError, login_with_password
@@ -27,6 +29,19 @@ router = APIRouter(tags=["mcp"])
 
 _mcp_server: FastMCP | None = None
 _mcp_starlette: Starlette | None = None
+_mcp_server_base_url: str | None = None
+
+
+class _MCPSubAppResponse(StarletteResponse):
+    """Encaminha a resposta ASGI do sub-app MCP (evita double-send no FastAPI)."""
+
+    def __init__(self, app: Starlette, scope: dict) -> None:
+        self._app = app
+        self._scope = scope
+        super().__init__(content=b"")
+
+    async def __call__(self, scope, receive, send) -> None:
+        await self._app(self._scope, receive, send)
 
 
 def _parse_optional_int(value: str | None) -> int | None:
@@ -39,24 +54,25 @@ def _parse_optional_int(value: str | None) -> int | None:
 
 
 def _mcp_transport_security() -> TransportSecuritySettings:
-    """Permite o Host do Render; o default do SDK só aceita localhost."""
-    public_host = urlparse(api_base_url()).netloc
+    """Permite Host do domínio público (Render, custom domain, localhost)."""
+    hosts: set[str] = set()
+    for key in ("API_BASE_URL", "RENDER_EXTERNAL_URL"):
+        url = os.getenv(key, "").strip()
+        if url:
+            hosts.add(urlparse(url).netloc)
+    hosts.add(urlparse(api_base_url()).netloc)
+    allowed = [h for host in hosts if host for h in (host, f"{host}:*")]
+    allowed.extend(["localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*"])
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[
-            public_host,
-            f"{public_host}:*",
-            "localhost",
-            "localhost:*",
-            "127.0.0.1",
-            "127.0.0.1:*",
-        ],
+        allowed_hosts=allowed,
     )
 
 
 def create_mcp_server() -> FastMCP:
-    global _mcp_server, _mcp_starlette
-    if _mcp_server is not None:
+    global _mcp_server, _mcp_starlette, _mcp_server_base_url
+    base = api_base_url()
+    if _mcp_server is not None and _mcp_server_base_url == base:
         return _mcp_server
 
     provider = get_mcp_auth_provider()
@@ -85,6 +101,7 @@ def create_mcp_server() -> FastMCP:
     register_tools(mcp)
     _mcp_server = mcp
     _mcp_starlette = mcp.streamable_http_app()
+    _mcp_server_base_url = base
     return mcp
 
 
@@ -140,14 +157,14 @@ async def mcp_openid_metadata_rfc8414(request: Request) -> Response:
 
 
 @router.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"])
-async def mcp_entry_no_trailing_slash(request: Request) -> None:
+async def mcp_entry_no_trailing_slash(request: Request) -> _MCPSubAppResponse:
     """Encaminha /mcp → sub-app sem redirect (308 quebrava Host header no Claude)."""
     mcp_app = get_mcp_starlette_app()
-    scope = request.scope
+    scope = dict(request.scope)
     scope["path"] = "/"
     scope["raw_path"] = b"/"
     scope["root_path"] = (scope.get("root_path") or "") + "/mcp"
-    await mcp_app(scope, request.receive, request._send)
+    return _MCPSubAppResponse(mcp_app, scope)
 
 
 @router.get("/.well-known/oauth-protected-resource/mcp")

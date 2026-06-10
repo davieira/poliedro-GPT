@@ -13,6 +13,8 @@ services:
         value: poliedro-gpt
       - key: OAUTH_CLIENT_SECRET
         generateValue: true
+      - key: API_BASE_URL
+        value: https://poliedro-api.iden.is
       - key: API_KEY
         sync: false
       - key: POLIEDRO_TOKEN
