@@ -128,8 +128,8 @@ Configuração do Claude: [docs/claude-desktop-config.example.json](docs/claude-
 | `GET /.well-known/oauth-authorization-server/mcp` | Metadados OAuth MCP (Claude) |
 | `GET /api/v1/grades` | Boletim (ChatGPT Actions) |
 | `GET /api/v1/assessments/simulation` | Simulado — resumo |
-| `GET /api/v1/assessments/simulation/list` | Simulado — listagem com UUID |
-| `GET /api/v1/assessments/simulation/performance` | Simulado — detalhe por matéria |
+| `GET /api/v1/assessments/simulation/list` | Simulado — listagem com `assessment_id` |
+| `GET /api/v1/assessments/simulation/{assessment_id}/performance` | Simulado — detalhe por matéria |
 | `GET /api/v1/messages` | Mensagens |
 | `GET /api/v1/calendar/*` | Calendário |
 

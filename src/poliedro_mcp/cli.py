@@ -23,9 +23,7 @@ def main() -> None:
     simulation_sub.add_parser("summary")
     simulation_sub.add_parser("list")
     sim_detail = simulation_sub.add_parser("detail")
-    sim_detail.add_argument("--assessment-id")
-    sim_detail.add_argument("--assessment-index", type=int)
-    sim_detail.add_argument("--assessment-name")
+    sim_detail.add_argument("--assessment-id", required=True)
     sim_detail.add_argument("--school-year", type=int)
 
     msg = sub.add_parser("messages")
@@ -50,12 +48,7 @@ def main() -> None:
         elif args.simulation_mode == "list":
             print_json(service.list_simulation_assessments())
         elif args.simulation_mode == "detail":
-            print_json(service.get_simulation_performance(
-                assessment_id=args.assessment_id,
-                assessment_index=args.assessment_index,
-                assessment_name=args.assessment_name,
-                school_year=args.school_year,
-            ))
+            print_json(service.get_simulation_performance(args.assessment_id))
     elif args.command == "messages":
         print_json(service.get_messages(status=args.status, limit=args.limit, page=args.page))
     elif args.command == "calendar":

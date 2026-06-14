@@ -334,19 +334,14 @@ def _register_stdio_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def get_simulation_performance(
-        assessment_id: str | None = None,
-        assessment_index: int | None = None,
-        assessment_name: str | None = None,
-        school_year: int | None = None,
+        assessment_id: str,
         poliedro_token: str | None = None,
         school_id: int | None = None,
         dependent_id: int | None = None,
     ) -> Any:
+        """Consulta detalhe do simulado por matéria. Use assessment_id de list_simulation_assessments."""
         return svc(poliedro_token, school_id, dependent_id).get_simulation_performance(
-            assessment_id=assessment_id,
-            assessment_index=assessment_index,
-            assessment_name=assessment_name,
-            school_year=school_year,
+            assessment_id
         )
 
     @mcp.tool()

@@ -72,19 +72,17 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def get_simulation_performance(
-        assessment_id: str | None = None,
-        assessment_index: int | None = None,
-        assessment_name: str | None = None,
-        school_year: int | None = None,
+        assessment_id: str,
         school_id: int | None = None,
         dependent_id: int | None = None,
     ) -> Any:
-        """Consulta detalhe do simulado por matéria."""
+        """
+        Consulta detalhe do simulado por matéria.
+
+        Use assessment_id retornado por list_simulation_assessments.
+        """
         return _service(school_id=school_id, dependent_id=dependent_id).get_simulation_performance(
-            assessment_id=assessment_id,
-            assessment_index=assessment_index,
-            assessment_name=assessment_name,
-            school_year=school_year,
+            assessment_id
         )
 
     @mcp.tool()

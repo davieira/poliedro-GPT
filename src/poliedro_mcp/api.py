@@ -137,8 +137,9 @@ def _handle_service_error(exc: Exception) -> JSONResponse:
         )
 
     if isinstance(exc, ProfileDiscoveryError):
+        status_code = status.HTTP_401_UNAUTHORIZED if "login novamente" in str(exc).lower() else status.HTTP_400_BAD_REQUEST
         return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status_code,
             content={"error": str(exc)},
         )
 
@@ -370,43 +371,56 @@ def list_simulation_assessments(
     _: None = Depends(verify_api_access),
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
-    """Lista simulados disponíveis com UUID, status, datas e nota geral."""
+    """Lista simulados com assessment_id (UUID) para usar no endpoint de detalhe."""
     try:
         return _service_for(ctx).list_simulation_assessments(school_year=school_year)
     except Exception as exc:
         return _handle_service_error(exc)
 
 
-@app.get(f"{API_PREFIX}/assessments/simulation/performance", tags=["poliedro"])
+@app.get(
+    f"{API_PREFIX}/assessments/simulation/{{assessment_id}}/performance",
+    tags=["poliedro"],
+)
 def get_simulation_performance(
-    assessment_id: str | None = Query(
-        default=None,
-        description="UUID do simulado no Poliedro.",
-    ),
-    assessment_index: int | None = Query(
-        default=None,
-        ge=0,
-        description=(
-            "Índice do simulado em /assessments/simulation/list (0 = 1º, 1 = 2º). "
-            "Também aceita numeração humana (1 = 1º, 2 = 2º) se o índice exato falhar."
-        ),
-    ),
-    assessment_name: str | None = Query(
-        default=None,
-        description="Parte do nome do simulado ou número ordinal, ex.: '2ª Avaliação' ou '2'.",
-    ),
-    school_year: int | None = Query(default=None, ge=2000, le=2100),
+    assessment_id: str,
     compare_with: int | None = Query(default=None, ge=0, le=2),
     _: None = Depends(verify_api_access),
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
-    """Consulta detalhe do simulado por matéria, acertos e notas parciais."""
+    """
+    Detalhe do simulado por matéria.
+
+    Fluxo: chame GET /assessments/simulation/list, copie assessment_id do simulado
+    desejado e use neste path (não use índice nem nome).
+    """
     try:
         return _service_for(ctx).get_simulation_performance(
-            assessment_id=assessment_id,
-            assessment_index=assessment_index,
-            assessment_name=assessment_name,
-            school_year=school_year,
+            assessment_id,
+            compare_with=compare_with,
+        )
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@app.get(
+    f"{API_PREFIX}/assessments/simulation/performance",
+    tags=["poliedro"],
+    include_in_schema=False,
+)
+def get_simulation_performance_legacy(
+    assessment_id: str = Query(
+        ...,
+        description="UUID retornado por GET /assessments/simulation/list.",
+    ),
+    compare_with: int | None = Query(default=None, ge=0, le=2),
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
+) -> Any:
+    """Compatibilidade com clientes que usam query param assessment_id."""
+    try:
+        return _service_for(ctx).get_simulation_performance(
+            assessment_id,
             compare_with=compare_with,
         )
     except Exception as exc:

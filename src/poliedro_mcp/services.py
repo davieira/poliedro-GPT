@@ -103,6 +103,23 @@ def _student_simulation_grades_list(overview: dict[str, Any]) -> list[str]:
     return []
 
 
+def _school_averages_by_name(overview: dict[str, Any]) -> dict[str, str]:
+    chart_points = overview.get("chartPoints") or []
+    school_values: list[str] = []
+    for series in overview.get("chartData") or []:
+        if series.get("label") == "Média da sua escola":
+            school_values = [str(value) for value in series.get("values") or []]
+            break
+
+    if not chart_points or not school_values:
+        return {}
+
+    if len(school_values) == len(chart_points):
+        return dict(zip(chart_points, school_values))
+
+    return {chart_points[-1]: school_values[-1]}
+
+
 def _sorted_assessments_from_all(all_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(all_items, key=lambda item: (item.get("dates") or [""])[0])
 
@@ -129,25 +146,6 @@ def _format_simulation_performance(raw: dict[str, Any]) -> dict[str, Any]:
         "subjects": subjects,
     }
 
-
-def _match_assessments_by_name(
-    assessments: list[dict[str, Any]],
-    assessment_name: str,
-) -> list[dict[str, Any]]:
-    query = assessment_name.strip().lower()
-    matches = [
-        item for item in assessments
-        if query in item["name"].lower() and item.get("assessment_id")
-    ]
-    if matches or not query.isdigit():
-        return matches
-
-    ordinal = int(query)
-    for item in assessments:
-        name = item["name"].lower()
-        if name.startswith(f"{ordinal}ª") or name.startswith(f"{ordinal}º"):
-            matches.append(item)
-    return matches
 
 class PoliedroService:
     def __init__(
@@ -199,9 +197,11 @@ class PoliedroService:
         all_items = self.get_all_simulation_assessments(school_year=school_year)
 
         grades_by_name: dict[str, str] = {}
+        school_averages_by_name: dict[str, str] = {}
         try:
             overview = self.get_simulation_grades(school_year=school_year)
             grades_by_name = _student_simulation_grades(overview)
+            school_averages_by_name = _school_averages_by_name(overview)
         except RuntimeError:
             logger.warning(
                 "Não foi possível carregar notas do evolution-graph; "
@@ -214,11 +214,13 @@ class PoliedroService:
         for index, item in enumerate(sorted_items):
             title = item.get("title", "")
             status = item.get("status") or {}
+            assessment_id = item.get("id")
             assessments.append({
                 "index": index,
                 "name": title,
-                "assessment_id": item.get("id"),
+                "assessment_id": assessment_id,
                 "grade": grades_by_name.get(title),
+                "school_average": school_averages_by_name.get(title),
                 "status": status.get("name"),
                 "dates": item.get("dates"),
             })
@@ -226,94 +228,50 @@ class PoliedroService:
         return {
             "school_year": school_year or self.cfg["student"]["school_year"],
             "assessments": assessments,
+            "usage": (
+                "Para detalhe por matéria, chame "
+                "GET /api/v1/assessments/simulation/{assessment_id}/performance "
+                "usando o assessment_id de cada item abaixo."
+            ),
         }
-
-    def _list_assessments_for_lookup(
-        self,
-        school_year: int | None = None,
-    ) -> list[dict[str, Any]]:
-        all_items = self.get_all_simulation_assessments(school_year=school_year)
-        sorted_items = _sorted_assessments_from_all(all_items)
-        assessments: list[dict[str, Any]] = []
-        for index, item in enumerate(sorted_items):
-            assessments.append({
-                "index": index,
-                "name": item.get("title", ""),
-                "assessment_id": item.get("id"),
-            })
-        return assessments
-
-    def _resolve_assessment_id(
-        self,
-        *,
-        assessment_id: str | None = None,
-        assessment_index: int | None = None,
-        assessment_name: str | None = None,
-        school_year: int | None = None,
-    ) -> str:
-        if assessment_id:
-            return assessment_id
-
-        assessments = self._list_assessments_for_lookup(school_year=school_year)
-
-        if assessment_index is not None:
-            index_candidates = [assessment_index]
-            if assessment_index >= 1:
-                index_candidates.append(assessment_index - 1)
-
-            seen: set[int] = set()
-            for candidate in index_candidates:
-                if candidate in seen:
-                    continue
-                seen.add(candidate)
-                for item in assessments:
-                    if item["index"] == candidate and item["assessment_id"]:
-                        return item["assessment_id"]
-
-            raise RuntimeError(
-                f"Simulado não encontrado para assessment_index={assessment_index}. "
-                "Use o campo index ou assessment_id retornado em /assessments/simulation/list."
-            )
-
-        if assessment_name:
-            matches = _match_assessments_by_name(assessments, assessment_name)
-            if len(matches) == 1:
-                return matches[0]["assessment_id"]
-            if len(matches) > 1:
-                names = ", ".join(item["name"] for item in matches)
-                raise RuntimeError(f"Nome ambíguo '{assessment_name}'. Simulados: {names}")
-
-        raise RuntimeError(
-            "Informe assessment_id (preferencial), assessment_index ou assessment_name. "
-            "Consulte /assessments/simulation/list antes do detalhe."
-        )
 
     def get_simulation_performance(
         self,
+        assessment_id: str,
         *,
-        assessment_id: str | None = None,
-        assessment_index: int | None = None,
-        assessment_name: str | None = None,
-        school_year: int | None = None,
         compare_with: int | None = None,
     ) -> Any:
         """Consulta detalhe do simulado por matéria (performance)."""
-        resolved_id = self._resolve_assessment_id(
-            assessment_id=assessment_id,
-            assessment_index=assessment_index,
-            assessment_name=assessment_name,
-            school_year=school_year,
-        )
+        if not assessment_id or not assessment_id.strip():
+            raise RuntimeError(
+                "assessment_id é obrigatório. "
+                "Obtenha-o em GET /api/v1/assessments/simulation/list."
+            )
+
         params = _performance_params(
             self.cfg,
-            resolved_id,
+            assessment_id.strip(),
             compare_with=compare_with,
         )
         raw = self.client.get(
             "/pmais/results/bff/results/assessment/performance",
             params=params,
         )
-        return _format_simulation_performance(raw)
+        result = _format_simulation_performance(raw)
+
+        for item in self.get_all_simulation_assessments():
+            if item.get("id") != assessment_id.strip():
+                continue
+            status_name = (item.get("status") or {}).get("name")
+            if status_name:
+                result["status"] = status_name
+                if "parcial" in status_name.lower():
+                    result["note"] = (
+                        "Resultado parcial: algumas matérias podem ainda estar em correção."
+                    )
+            break
+
+        return result
 
     def get_messages(self, status: str | None = None, limit: int | None = None, page: int | None = None) -> Any:
         ncfg = self.cfg["notifications"]

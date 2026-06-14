@@ -32,9 +32,16 @@ class ProfileChoiceRequired(ProfileDiscoveryError):
 def decode_jwt_claims(access_token: str) -> dict[str, Any]:
     parts = access_token.split(".")
     if len(parts) < 2:
-        raise ProfileDiscoveryError("Token JWT inválido.")
+        raise ProfileDiscoveryError(
+            "Token JWT inválido. Faça login novamente no ChatGPT (Sign in)."
+        )
     payload = parts[1] + "=" * (-len(parts[1]) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload))
+    try:
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as exc:
+        raise ProfileDiscoveryError(
+            "Token JWT inválido ou corrompido. Faça login novamente no ChatGPT (Sign in)."
+        ) from exc
 
 
 def _api_headers(access_token: str) -> dict[str, str]:

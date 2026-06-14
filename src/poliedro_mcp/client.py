@@ -4,7 +4,7 @@ from typing import Any
 
 import requests
 
-from .auth import get_manual_token, get_password, login_with_password
+from .auth import LoginError, get_manual_token, get_password, login_with_password
 from .config_loader import load_config
 
 
@@ -59,7 +59,7 @@ class PoliedroClient:
 
         if response.status_code == 401:
             if self._provided_token:
-                raise RuntimeError(
+                raise LoginError(
                     "Token Poliedro expirado ou inválido. "
                     "Faça login novamente no ChatGPT (Sign in) ou no Claude."
                 )
