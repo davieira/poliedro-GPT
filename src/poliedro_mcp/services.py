@@ -6,6 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .client import PoliedroClient
+from .logger import logger
 
 
 def _common_calendar_params(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -150,8 +151,16 @@ class PoliedroService:
     def list_simulation_assessments(self, school_year: int | None = None) -> dict[str, Any]:
         """Lista simulados com UUID, status, datas e nota geral quando disponível."""
         all_items = self.get_all_simulation_assessments(school_year=school_year)
-        overview = self.get_simulation_grades(school_year=school_year)
-        grades_by_name = _student_simulation_grades(overview)
+
+        grades_by_name: dict[str, str] = {}
+        try:
+            overview = self.get_simulation_grades(school_year=school_year)
+            grades_by_name = _student_simulation_grades(overview)
+        except RuntimeError:
+            logger.warning(
+                "Não foi possível carregar notas do evolution-graph; "
+                "retornando listagem de simulados sem nota geral."
+            )
 
         sorted_items = sorted(
             all_items,

@@ -367,11 +367,12 @@ def get_grades(
 @app.get(f"{API_PREFIX}/assessments/simulation/list", tags=["poliedro"])
 def list_simulation_assessments(
     school_year: int | None = Query(default=None, ge=2000, le=2100),
-    _: None = Depends(verify_api_key),
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Lista simulados disponíveis com UUID, status, datas e nota geral."""
     try:
-        return _service().list_simulation_assessments(school_year=school_year)
+        return _service_for(ctx).list_simulation_assessments(school_year=school_year)
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -393,11 +394,12 @@ def get_simulation_performance(
     ),
     school_year: int | None = Query(default=None, ge=2000, le=2100),
     compare_with: int | None = Query(default=None, ge=0, le=2),
-    _: None = Depends(verify_api_key),
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta detalhe do simulado por matéria, acertos e notas parciais."""
     try:
-        return _service().get_simulation_performance(
+        return _service_for(ctx).get_simulation_performance(
             assessment_id=assessment_id,
             assessment_index=assessment_index,
             assessment_name=assessment_name,
@@ -416,11 +418,12 @@ def get_simulation_grades(
         ge=2000,
         le=2100,
     ),
-    _: None = Depends(verify_api_key),
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta notas do simulado / prova trimestral do Poliedro/P+."""
     try:
-        return _service().get_simulation_grades(school_year=school_year)
+        return _service_for(ctx).get_simulation_grades(school_year=school_year)
     except Exception as exc:
         return _handle_service_error(exc)
 

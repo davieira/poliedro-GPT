@@ -61,7 +61,7 @@ class PoliedroClient:
             if self._provided_token:
                 raise RuntimeError(
                     "Token Poliedro expirado ou inválido. "
-                    "Faça login novamente em POST /api/v1/auth/login."
+                    "Faça login novamente no ChatGPT (Sign in) ou no Claude."
                 )
             self.authenticate()
             response = self.session.get(url, params=params, timeout=timeout)
