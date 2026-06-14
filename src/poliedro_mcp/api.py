@@ -386,11 +386,14 @@ def get_simulation_performance(
     assessment_index: int | None = Query(
         default=None,
         ge=0,
-        description="Índice do simulado retornado em /assessments/simulation/list.",
+        description=(
+            "Índice do simulado em /assessments/simulation/list (0 = 1º, 1 = 2º). "
+            "Também aceita numeração humana (1 = 1º, 2 = 2º) se o índice exato falhar."
+        ),
     ),
     assessment_name: str | None = Query(
         default=None,
-        description="Parte do nome do simulado, ex.: '2ª Avaliação'.",
+        description="Parte do nome do simulado ou número ordinal, ex.: '2ª Avaliação' ou '2'.",
     ),
     school_year: int | None = Query(default=None, ge=2000, le=2100),
     compare_with: int | None = Query(default=None, ge=0, le=2),

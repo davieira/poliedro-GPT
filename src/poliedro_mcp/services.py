@@ -103,6 +103,52 @@ def _student_simulation_grades_list(overview: dict[str, Any]) -> list[str]:
     return []
 
 
+def _sorted_assessments_from_all(all_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(all_items, key=lambda item: (item.get("dates") or [""])[0])
+
+
+def _format_simulation_performance(raw: dict[str, Any]) -> dict[str, Any]:
+    subjects: list[dict[str, Any]] = []
+    for step in raw.get("steps") or []:
+        for subject in step.get("subjects") or []:
+            row = (subject.get("fronts") or {}).get("rows") or []
+            subjects.append({
+                "name": subject.get("name"),
+                "grade": subject.get("testGrade"),
+                "grade_detail": row[0].get("grade") if row else None,
+                "hits": row[0].get("hits") if row else None,
+            })
+
+    general = raw.get("general") or {}
+    student = raw.get("student") or {}
+    return {
+        "assessment_id": raw.get("id"),
+        "name": raw.get("name"),
+        "overall_grade": general.get("testGrade"),
+        "student_name": student.get("name"),
+        "subjects": subjects,
+    }
+
+
+def _match_assessments_by_name(
+    assessments: list[dict[str, Any]],
+    assessment_name: str,
+) -> list[dict[str, Any]]:
+    query = assessment_name.strip().lower()
+    matches = [
+        item for item in assessments
+        if query in item["name"].lower() and item.get("assessment_id")
+    ]
+    if matches or not query.isdigit():
+        return matches
+
+    ordinal = int(query)
+    for item in assessments:
+        name = item["name"].lower()
+        if name.startswith(f"{ordinal}ª") or name.startswith(f"{ordinal}º"):
+            matches.append(item)
+    return matches
+
 class PoliedroService:
     def __init__(
         self,
@@ -162,10 +208,7 @@ class PoliedroService:
                 "retornando listagem de simulados sem nota geral."
             )
 
-        sorted_items = sorted(
-            all_items,
-            key=lambda item: (item.get("dates") or [""])[0],
-        )
+        sorted_items = _sorted_assessments_from_all(all_items)
 
         assessments = []
         for index, item in enumerate(sorted_items):
@@ -185,6 +228,21 @@ class PoliedroService:
             "assessments": assessments,
         }
 
+    def _list_assessments_for_lookup(
+        self,
+        school_year: int | None = None,
+    ) -> list[dict[str, Any]]:
+        all_items = self.get_all_simulation_assessments(school_year=school_year)
+        sorted_items = _sorted_assessments_from_all(all_items)
+        assessments: list[dict[str, Any]] = []
+        for index, item in enumerate(sorted_items):
+            assessments.append({
+                "index": index,
+                "name": item.get("title", ""),
+                "assessment_id": item.get("id"),
+            })
+        return assessments
+
     def _resolve_assessment_id(
         self,
         *,
@@ -196,26 +254,29 @@ class PoliedroService:
         if assessment_id:
             return assessment_id
 
-        listing = self.list_simulation_assessments(school_year=school_year)
-        assessments = listing["assessments"]
+        assessments = self._list_assessments_for_lookup(school_year=school_year)
 
         if assessment_index is not None:
-            for item in assessments:
-                if item["index"] == assessment_index:
-                    if not item["assessment_id"]:
-                        raise RuntimeError(
-                            f"assessment_id não encontrado para o simulado "
-                            f"índice {assessment_index} ({item['name']})."
-                        )
-                    return item["assessment_id"]
-            raise RuntimeError(f"Índice de simulado inválido: {assessment_index}")
+            index_candidates = [assessment_index]
+            if assessment_index >= 1:
+                index_candidates.append(assessment_index - 1)
+
+            seen: set[int] = set()
+            for candidate in index_candidates:
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                for item in assessments:
+                    if item["index"] == candidate and item["assessment_id"]:
+                        return item["assessment_id"]
+
+            raise RuntimeError(
+                f"Simulado não encontrado para assessment_index={assessment_index}. "
+                "Use o campo index ou assessment_id retornado em /assessments/simulation/list."
+            )
 
         if assessment_name:
-            query = assessment_name.strip().lower()
-            matches = [
-                item for item in assessments
-                if query in item["name"].lower() and item["assessment_id"]
-            ]
+            matches = _match_assessments_by_name(assessments, assessment_name)
             if len(matches) == 1:
                 return matches[0]["assessment_id"]
             if len(matches) > 1:
@@ -223,8 +284,8 @@ class PoliedroService:
                 raise RuntimeError(f"Nome ambíguo '{assessment_name}'. Simulados: {names}")
 
         raise RuntimeError(
-            "Informe assessment_id, assessment_index ou assessment_name "
-            "para consultar o detalhe do simulado."
+            "Informe assessment_id (preferencial), assessment_index ou assessment_name. "
+            "Consulte /assessments/simulation/list antes do detalhe."
         )
 
     def get_simulation_performance(
@@ -248,10 +309,11 @@ class PoliedroService:
             resolved_id,
             compare_with=compare_with,
         )
-        return self.client.get(
+        raw = self.client.get(
             "/pmais/results/bff/results/assessment/performance",
             params=params,
         )
+        return _format_simulation_performance(raw)
 
     def get_messages(self, status: str | None = None, limit: int | None = None, page: int | None = None) -> Any:
         ncfg = self.cfg["notifications"]
