@@ -9,6 +9,7 @@ API REST e servidor MCP **não oficial** para consultar notas, mensagens e calen
 ## O que faz
 
 - Boletim / notas
+- Simulados / provas trimestrais (resumo, listagem e detalhe por matéria)
 - Mensagens e notificações
 - Calendário escolar (próximos eventos, semana, mês, ano)
 - Integração com **ChatGPT** (Actions + OAuth)
@@ -97,7 +98,7 @@ python print_oauth_config.py https://poliedro-api.iden.is
 5. Conecte → faça login com usuário e senha do P+ (usuário **sem** `@p4ed.com`)
 6. Se tiver várias escolas ou dependentes, preencha na tela de login
 
-**Ferramentas MCP:** `get_grades`, `get_messages`, `get_unread_messages`, `get_next_events`, calendário (semana/mês/ano), `poliedro_health_check`.
+**Ferramentas MCP:** `get_grades`, simulados (`get_simulation_grades`, `list_simulation_assessments`, `get_simulation_performance`), `get_messages`, `get_unread_messages`, `get_next_events`, calendário (semana/mês/ano), `poliedro_health_check`.
 
 Guia completo e troubleshooting: [docs/claude-remote-setup.md](docs/claude-remote-setup.md)
 
@@ -126,6 +127,9 @@ Configuração do Claude: [docs/claude-desktop-config.example.json](docs/claude-
 | `POST /mcp/token` | Token OAuth MCP |
 | `GET /.well-known/oauth-authorization-server/mcp` | Metadados OAuth MCP (Claude) |
 | `GET /api/v1/grades` | Boletim (ChatGPT Actions) |
+| `GET /api/v1/assessments/simulation` | Simulado — resumo |
+| `GET /api/v1/assessments/simulation/list` | Simulado — listagem com UUID |
+| `GET /api/v1/assessments/simulation/performance` | Simulado — detalhe por matéria |
 | `GET /api/v1/messages` | Mensagens |
 | `GET /api/v1/calendar/*` | Calendário |
 
@@ -159,7 +163,7 @@ export API_BASE_URL=http://localhost:8000
 uvicorn poliedro_mcp.api:app --reload --port 8000
 ```
 
-Validar: `python -m poliedro_mcp.cli health`
+Validar: `python -m poliedro_mcp.cli health` · simulados: `python -m poliedro_mcp.cli simulation list`
 
 ## Licença
 

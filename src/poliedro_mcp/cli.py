@@ -18,6 +18,16 @@ def main() -> None:
     sub.add_parser("health")
     sub.add_parser("grades")
 
+    simulation = sub.add_parser("simulation")
+    simulation_sub = simulation.add_subparsers(dest="simulation_mode", required=True)
+    simulation_sub.add_parser("summary")
+    simulation_sub.add_parser("list")
+    sim_detail = simulation_sub.add_parser("detail")
+    sim_detail.add_argument("--assessment-id")
+    sim_detail.add_argument("--assessment-index", type=int)
+    sim_detail.add_argument("--assessment-name")
+    sim_detail.add_argument("--school-year", type=int)
+
     msg = sub.add_parser("messages")
     msg.add_argument("--status", default="UNREAD")
     msg.add_argument("--limit", type=int, default=50)
@@ -34,6 +44,18 @@ def main() -> None:
         print_json(service.health_check())
     elif args.command == "grades":
         print_json(service.get_grades())
+    elif args.command == "simulation":
+        if args.simulation_mode == "summary":
+            print_json(service.get_simulation_grades())
+        elif args.simulation_mode == "list":
+            print_json(service.list_simulation_assessments())
+        elif args.simulation_mode == "detail":
+            print_json(service.get_simulation_performance(
+                assessment_id=args.assessment_id,
+                assessment_index=args.assessment_index,
+                assessment_name=args.assessment_name,
+                school_year=args.school_year,
+            ))
     elif args.command == "messages":
         print_json(service.get_messages(status=args.status, limit=args.limit, page=args.page))
     elif args.command == "calendar":

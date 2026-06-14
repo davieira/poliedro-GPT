@@ -364,6 +364,67 @@ def get_grades(
         return _handle_service_error(exc)
 
 
+@app.get(f"{API_PREFIX}/assessments/simulation/list", tags=["poliedro"])
+def list_simulation_assessments(
+    school_year: int | None = Query(default=None, ge=2000, le=2100),
+    _: None = Depends(verify_api_key),
+) -> Any:
+    """Lista simulados disponíveis com UUID, status, datas e nota geral."""
+    try:
+        return _service().list_simulation_assessments(school_year=school_year)
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@app.get(f"{API_PREFIX}/assessments/simulation/performance", tags=["poliedro"])
+def get_simulation_performance(
+    assessment_id: str | None = Query(
+        default=None,
+        description="UUID do simulado no Poliedro.",
+    ),
+    assessment_index: int | None = Query(
+        default=None,
+        ge=0,
+        description="Índice do simulado retornado em /assessments/simulation/list.",
+    ),
+    assessment_name: str | None = Query(
+        default=None,
+        description="Parte do nome do simulado, ex.: '2ª Avaliação'.",
+    ),
+    school_year: int | None = Query(default=None, ge=2000, le=2100),
+    compare_with: int | None = Query(default=None, ge=0, le=2),
+    _: None = Depends(verify_api_key),
+) -> Any:
+    """Consulta detalhe do simulado por matéria, acertos e notas parciais."""
+    try:
+        return _service().get_simulation_performance(
+            assessment_id=assessment_id,
+            assessment_index=assessment_index,
+            assessment_name=assessment_name,
+            school_year=school_year,
+            compare_with=compare_with,
+        )
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@app.get(f"{API_PREFIX}/assessments/simulation", tags=["poliedro"])
+def get_simulation_grades(
+    school_year: int | None = Query(
+        default=None,
+        description="Ano letivo. Se omitido, usa o configurado no aluno.",
+        ge=2000,
+        le=2100,
+    ),
+    _: None = Depends(verify_api_key),
+) -> Any:
+    """Consulta notas do simulado / prova trimestral do Poliedro/P+."""
+    try:
+        return _service().get_simulation_grades(school_year=school_year)
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
 @app.get(f"{API_PREFIX}/messages", tags=["poliedro"])
 def get_messages(
     status_filter: str = Query(

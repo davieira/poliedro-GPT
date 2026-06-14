@@ -97,6 +97,9 @@ Se retornar 401, peça para fazer login novamente.
 | POST | `/oauth/token` | Troca code por token |
 | GET | `/api/v1/health` | Status |
 | GET | `/api/v1/grades` | Boletim / notas |
+| GET | `/api/v1/assessments/simulation` | Simulado — resumo |
+| GET | `/api/v1/assessments/simulation/list` | Simulado — listagem com UUID |
+| GET | `/api/v1/assessments/simulation/performance` | Simulado — detalhe por matéria |
 | GET | `/api/v1/messages` | Mensagens |
 | GET | `/api/v1/messages/unread` | Não lidas |
 | GET | `/api/v1/calendar/next` | Próximos eventos |
