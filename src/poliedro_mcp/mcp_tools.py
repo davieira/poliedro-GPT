@@ -104,9 +104,20 @@ def register_tools(mcp: FastMCP) -> None:
         school_id: int | None = None,
         dependent_id: int | None = None,
     ) -> Any:
-        """Consulta mensagens/notificações do portal Poliedro/P+."""
+        """Lista mensagens/comunicados com preview. Use announcement_id em get_message_detail."""
         return _service(school_id=school_id, dependent_id=dependent_id).get_messages(
             status=status, limit=limit, page=page
+        )
+
+    @mcp.tool()
+    def get_message_detail(
+        announcement_id: int,
+        school_id: int | None = None,
+        dependent_id: int | None = None,
+    ) -> Any:
+        """Consulta conteúdo completo de um comunicado. Use announcement_id de get_messages."""
+        return _service(school_id=school_id, dependent_id=dependent_id).get_message_detail(
+            announcement_id
         )
 
     @mcp.tool()

@@ -479,6 +479,23 @@ def get_unread_messages(
         return _handle_service_error(exc)
 
 
+@app.get(f"{API_PREFIX}/messages/{{announcement_id}}", tags=["poliedro"])
+def get_message_detail(
+    announcement_id: int,
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
+) -> Any:
+    """
+    Conteúdo completo de um comunicado/mensagem.
+
+    Use o announcement_id retornado por GET /messages (campo announcement_id).
+    """
+    try:
+        return _service_for(ctx).get_message_detail(announcement_id)
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
 @app.get(f"{API_PREFIX}/calendar/next", tags=["poliedro"])
 def get_next_events(
     _: None = Depends(verify_api_access),

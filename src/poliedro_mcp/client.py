@@ -73,3 +73,32 @@ class PoliedroClient:
             )
 
         return response.json()
+
+    def get_external(
+        self,
+        base_url: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        timeout: int = 20,
+    ) -> Any:
+        """GET em host alternativo (ex.: announcement-events-bff) com o mesmo token."""
+        url = f"{base_url.rstrip('/')}{path}"
+
+        response = self.session.get(url, params=params, timeout=timeout)
+
+        if response.status_code == 401:
+            if self._provided_token:
+                raise LoginError(
+                    "Token Poliedro expirado ou inválido. "
+                    "Faça login novamente no ChatGPT (Sign in) ou no Claude."
+                )
+            self.authenticate()
+            response = self.session.get(url, params=params, timeout=timeout)
+
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Erro Poliedro API HTTP {response.status_code} em {response.url}: "
+                f"{response.text}"
+            )
+
+        return response.json()

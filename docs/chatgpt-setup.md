@@ -79,6 +79,8 @@ Use as Actions para consultar a API e resuma os dados em português claro.
 Para simulados trimestrais: (1) chame GET /assessments/simulation/list;
 (2) use o assessment_id retornado em GET /assessments/simulation/{assessment_id}/performance.
 Nunca invente UUID nem use índice ordinal no lugar do assessment_id.
+Para mensagens/comunicados: (1) chame GET /messages;
+(2) use o announcement_id retornado em GET /messages/{announcement_id} para o texto completo.
 Se retornar 409 com escolha_necessaria, peça school_id ou dependent_id e tente de novo.
 Se retornar 401, peça para fazer login novamente (Sign in).
 ```
@@ -103,8 +105,9 @@ Se retornar 401, peça para fazer login novamente (Sign in).
 | GET | `/api/v1/assessments/simulation` | Simulado — resumo |
 | GET | `/api/v1/assessments/simulation/list` | Simulado — listagem com `assessment_id` |
 | GET | `/api/v1/assessments/simulation/{assessment_id}/performance` | Simulado — detalhe por matéria |
-| GET | `/api/v1/messages` | Mensagens |
+| GET | `/api/v1/messages` | Mensagens — listagem com preview |
 | GET | `/api/v1/messages/unread` | Não lidas |
+| GET | `/api/v1/messages/{announcement_id}` | Mensagem — conteúdo completo |
 | GET | `/api/v1/calendar/next` | Próximos eventos |
 | GET | `/api/v1/calendar/week` | Semana |
 | GET | `/api/v1/calendar/month` | Mês |

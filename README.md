@@ -130,7 +130,8 @@ Configuração do Claude: [docs/claude-desktop-config.example.json](docs/claude-
 | `GET /api/v1/assessments/simulation` | Simulado — resumo |
 | `GET /api/v1/assessments/simulation/list` | Simulado — listagem com `assessment_id` |
 | `GET /api/v1/assessments/simulation/{assessment_id}/performance` | Simulado — detalhe por matéria |
-| `GET /api/v1/messages` | Mensagens |
+| `GET /api/v1/messages` | Mensagens — listagem com preview |
+| `GET /api/v1/messages/{announcement_id}` | Mensagem — conteúdo completo |
 | `GET /api/v1/calendar/*` | Calendário |
 
 Documentação interativa: `/docs` · OpenAPI (ChatGPT): `/openapi.json`

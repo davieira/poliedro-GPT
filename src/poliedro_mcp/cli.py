@@ -30,6 +30,8 @@ def main() -> None:
     msg.add_argument("--status", default="UNREAD")
     msg.add_argument("--limit", type=int, default=50)
     msg.add_argument("--page", type=int, default=1)
+    msg_detail = sub.add_parser("message-detail")
+    msg_detail.add_argument("--announcement-id", type=int, required=True)
 
     cal = sub.add_parser("calendar")
     cal.add_argument("mode", choices=["next", "week", "month", "year"])
@@ -51,6 +53,8 @@ def main() -> None:
             print_json(service.get_simulation_performance(args.assessment_id))
     elif args.command == "messages":
         print_json(service.get_messages(status=args.status, limit=args.limit, page=args.page))
+    elif args.command == "message-detail":
+        print_json(service.get_message_detail(args.announcement_id))
     elif args.command == "calendar":
         if args.mode == "next":
             print_json(service.get_next_events())

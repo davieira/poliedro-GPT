@@ -23,6 +23,9 @@
     "notification_type": "JUST_IN_APP",
     "status": "UNREAD"
   },
+  "announcements": {
+    "base_url": "https://announcement-events-bff.p4ed.com"
+  },
   "assessment": {
     "source_system": "56d92fd9-c2e1-4293-a06a-6f2af49e7357",
     "view_mode": 3,

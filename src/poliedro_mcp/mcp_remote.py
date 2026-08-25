@@ -369,6 +369,18 @@ def _register_stdio_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
+    def get_message_detail(
+        announcement_id: int,
+        poliedro_token: str | None = None,
+        school_id: int | None = None,
+        dependent_id: int | None = None,
+    ) -> Any:
+        """Consulta conteúdo completo de um comunicado. Use announcement_id de get_messages."""
+        return svc(poliedro_token, school_id, dependent_id).get_message_detail(
+            announcement_id
+        )
+
+    @mcp.tool()
     def get_next_events(
         poliedro_token: str | None = None,
         school_id: int | None = None,

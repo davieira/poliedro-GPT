@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from email.utils import format_datetime
 from typing import Any
@@ -7,6 +8,64 @@ from zoneinfo import ZoneInfo
 
 from .client import PoliedroClient
 from .logger import logger
+
+
+DEFAULT_ANNOUNCEMENTS_BASE_URL = "https://announcement-events-bff.p4ed.com"
+
+_DEEPLINK_ANNOUNCEMENT_RE = re.compile(
+    r"announcement-details-screen/(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _announcements_base_url(cfg: dict[str, Any]) -> str:
+    acfg = cfg.get("announcements") or {}
+    return acfg.get("base_url", DEFAULT_ANNOUNCEMENTS_BASE_URL).rstrip("/")
+
+
+def _parse_announcement_id_from_deeplink(deeplink: str | None) -> int | None:
+    if not deeplink:
+        return None
+    match = _DEEPLINK_ANNOUNCEMENT_RE.search(deeplink)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _format_message_list_item(item: dict[str, Any]) -> dict[str, Any]:
+    mapping = (item.get("notificationsUserMapping") or [{}])[0]
+    announcement_id = _parse_announcement_id_from_deeplink(item.get("deeplink"))
+    return {
+        "notification_id": item.get("id"),
+        "title": item.get("title"),
+        "preview": item.get("body"),
+        "published_at": item.get("publishedAt"),
+        "status": mapping.get("status"),
+        "announcement_id": announcement_id,
+        "deeplink": item.get("deeplink"),
+    }
+
+
+def _format_announcement_detail(raw: dict[str, Any]) -> dict[str, Any]:
+    categories = []
+    for category in raw.get("categories") or []:
+        option = category.get("option") or {}
+        if option.get("name"):
+            categories.append(option["name"])
+
+    return {
+        "announcement_id": raw.get("id"),
+        "title": raw.get("title"),
+        "content": raw.get("content"),
+        "content_rich_text": raw.get("contentRichText"),
+        "author_name": raw.get("authorName"),
+        "available_at": raw.get("availableAt"),
+        "created_at": raw.get("createdAt"),
+        "school_id": raw.get("schoolId"),
+        "dependent_id": raw.get("dependentId"),
+        "categories": categories,
+        "is_draft": raw.get("isDraft"),
+    }
 
 
 def _common_calendar_params(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -285,7 +344,38 @@ class PoliedroService:
             "status": status or ncfg["status"],
         }
 
-        return self.client.get("/pmais/api/v1/notifications", params=params)
+        raw = self.client.get("/pmais/api/v1/notifications", params=params)
+        messages = [_format_message_list_item(item) for item in raw.get("data") or []]
+
+        return {
+            "messages": messages,
+            "meta": raw.get("meta"),
+            "usage": (
+                "Para o texto completo do comunicado, chame "
+                "GET /api/v1/messages/{announcement_id} usando announcement_id de cada item."
+            ),
+        }
+
+    def get_message_detail(self, announcement_id: int | str) -> dict[str, Any]:
+        """Consulta conteúdo completo de um comunicado/mensagem."""
+        if announcement_id is None or str(announcement_id).strip() == "":
+            raise RuntimeError(
+                "announcement_id é obrigatório. "
+                "Obtenha-o em GET /api/v1/messages (campo announcement_id)."
+            )
+
+        params = {
+            "schoolId": self.cfg["student"]["school_id"],
+            "roleId": self.cfg["student"]["role_id"],
+            "dependentId": self.cfg["calendar"]["owner_id"],
+        }
+        raw = self.client.get_external(
+            _announcements_base_url(self.cfg),
+            f"/v1/announcement/{int(announcement_id)}",
+            params=params,
+            timeout=30,
+        )
+        return _format_announcement_detail(raw)
 
     def get_next_events(self) -> Any:
         params = _common_calendar_params(self.cfg)
