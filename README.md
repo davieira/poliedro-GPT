@@ -1,4 +1,4 @@
-# Poliedro P+ para CLaude ou ChatGPT
+# Poliedro P+ para Claude ou ChatGPT
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
