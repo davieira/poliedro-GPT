@@ -54,6 +54,16 @@ class _CodePayload:
     poliedro_access_token: str
     poliedro_refresh_token: str | None
     expires_in: int
+    school_id: int | None = None
+    dependent_id: int | None = None
+
+
+@dataclass
+class _RefreshEntry:
+    token: RefreshToken
+    poliedro_refresh_token: str | None
+    school_id: int | None = None
+    dependent_id: int | None = None
 
 
 class PoliedroMcpAuthProvider(
@@ -63,7 +73,7 @@ class PoliedroMcpAuthProvider(
 
     def __init__(self) -> None:
         self._clients: dict[str, OAuthClientInformationFull] = {}
-        self._refresh: dict[str, tuple[RefreshToken, str | None]] = {}
+        self._refresh: dict[str, _RefreshEntry] = {}
         self._access: dict[str, AccessToken] = {}
         self._codes: dict[str, tuple[float, _CodePayload]] = {}
         self._used_code_jtis: dict[str, float] = {}
@@ -118,6 +128,8 @@ class PoliedroMcpAuthProvider(
         poliedro_refresh_token: str | None,
         expires_in: int,
         expires_at: float,
+        school_id: int | None = None,
+        dependent_id: int | None = None,
     ) -> _CodePayload:
         auth_code = AuthorizationCode(
             code=code,
@@ -134,6 +146,8 @@ class PoliedroMcpAuthProvider(
             poliedro_access_token=poliedro_access_token,
             poliedro_refresh_token=poliedro_refresh_token,
             expires_in=expires_in,
+            school_id=school_id,
+            dependent_id=dependent_id,
         )
 
     def _load_code_payload(self, authorization_code: str) -> _CodePayload | None:
@@ -207,10 +221,15 @@ class PoliedroMcpAuthProvider(
     ) -> OAuthToken:
         poliedro_access = self._resolve_poliedro_access_token(payload)
         expires_in = payload.expires_in
-        session_access = mint_session_access_token(poliedro_access, expires_in=expires_in)
+        session_access = mint_session_access_token(
+            poliedro_access,
+            expires_in=expires_in,
+            school_id=payload.school_id,
+            dependent_id=payload.dependent_id,
+        )
 
         self._access[session_access] = AccessToken(
-            token=poliedro_access,
+            token=session_access,
             client_id=client.client_id or "",
             scopes=scopes,
             expires_at=int(time.time()) + expires_in,
@@ -219,13 +238,15 @@ class PoliedroMcpAuthProvider(
         refresh_key: str | None = None
         if payload.poliedro_refresh_token:
             refresh_key = secrets.token_urlsafe(32)
-            self._refresh[refresh_key] = (
-                RefreshToken(
+            self._refresh[refresh_key] = _RefreshEntry(
+                token=RefreshToken(
                     token=refresh_key,
                     client_id=client.client_id or "",
                     scopes=scopes,
                 ),
-                payload.poliedro_refresh_token,
+                poliedro_refresh_token=payload.poliedro_refresh_token,
+                school_id=payload.school_id,
+                dependent_id=payload.dependent_id,
             )
 
         return OAuthToken(
@@ -289,6 +310,8 @@ class PoliedroMcpAuthProvider(
         poliedro_access_token: str,
         poliedro_refresh_token: str | None,
         expires_in: int,
+        school_id: int | None = None,
+        dependent_id: int | None = None,
     ) -> str:
         entry = self.get_pending(pending_id)
         if entry is None:
@@ -307,6 +330,8 @@ class PoliedroMcpAuthProvider(
             poliedro_refresh_token=poliedro_refresh_token,
             expires_in=expires_in,
             expires_at=now + AUTH_CODE_TTL,
+            school_id=school_id,
+            dependent_id=dependent_id,
         )
         self._codes[code_str] = (now, code_payload)
 
@@ -373,10 +398,9 @@ class PoliedroMcpAuthProvider(
         entry = self._refresh.get(refresh_token)
         if entry is None:
             return None
-        token, _ = entry
-        if token.client_id != client.client_id:
+        if entry.token.client_id != client.client_id:
             return None
-        return token
+        return entry.token
 
     async def exchange_refresh_token(
         self,
@@ -388,7 +412,7 @@ class PoliedroMcpAuthProvider(
         if entry is None:
             raise TokenError("invalid_grant", "refresh_token inválido")
 
-        _, poliedro_refresh = entry
+        poliedro_refresh = entry.poliedro_refresh_token
         if not poliedro_refresh:
             raise TokenError("invalid_grant", "refresh_token indisponível")
 
@@ -402,18 +426,25 @@ class PoliedroMcpAuthProvider(
 
         new_refresh_key = secrets.token_urlsafe(32)
         self._refresh.pop(refresh_token.token, None)
-        self._refresh[new_refresh_key] = (
-            RefreshToken(
+        self._refresh[new_refresh_key] = _RefreshEntry(
+            token=RefreshToken(
                 token=new_refresh_key,
                 client_id=client.client_id or "",
                 scopes=scopes,
             ),
-            new_poliedro_refresh,
+            poliedro_refresh_token=new_poliedro_refresh,
+            school_id=entry.school_id,
+            dependent_id=entry.dependent_id,
         )
 
-        session_access = mint_session_access_token(new_access, expires_in=expires_in)
+        session_access = mint_session_access_token(
+            new_access,
+            expires_in=expires_in,
+            school_id=entry.school_id,
+            dependent_id=entry.dependent_id,
+        )
         self._access[session_access] = AccessToken(
-            token=new_access,
+            token=session_access,
             client_id=client.client_id or "",
             scopes=scopes,
             expires_at=int(time.time()) + expires_in,
@@ -445,7 +476,7 @@ class PoliedroMcpAuthProvider(
             except Exception:
                 return None
             return AccessToken(
-                token=poliedro_token,
+                token=token,
                 client_id="poliedro",
                 scopes=DEFAULT_SCOPES,
             )

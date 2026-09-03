@@ -21,7 +21,7 @@ from .auth import LoginError, login_with_password
 from .logger import logger
 from .mcp_auth_provider import get_mcp_auth_provider
 from .mcp_tools import register_tools
-from .oauth_proxy import GITHUB_REPO_URL, _login_html
+from .oauth_proxy import GITHUB_REPO_URL, _login_html, mint_choice_token, resolve_form_tokens
 from .profile_discovery import ProfileChoiceRequired, discover_profile_config
 from .user_context import get_base_config
 
@@ -197,10 +197,11 @@ def mcp_login_get(pending: str = Query(...)) -> HTMLResponse:
 @router.post("/mcp/login", response_model=None)
 def mcp_login_post(
     pending: str = Form(...),
-    username: str = Form(...),
-    password: str = Form(...),
+    username: str = Form(default=""),
+    password: str | None = Form(default=None),
     school_id: str | None = Form(default=None),
     dependent_id: str | None = Form(default=None),
+    login_choice: str | None = Form(default=None),
 ) -> Response:
     provider = get_mcp_auth_provider()
     if provider.get_pending(pending) is None:
@@ -208,42 +209,73 @@ def mcp_login_post(
 
     base = get_base_config()
     base_url = base["base_url"].rstrip("/")
-
-    try:
-        tokens = login_with_password(base_url, username.strip(), password)
-    except LoginError as exc:
-        logger.warning("MCP OAuth: login P+ falhou para usuário %s: %s", username.strip(), exc)
-        return HTMLResponse(_mcp_login_html(pending=pending, error=str(exc)), status_code=401)
-
-    access_token = tokens["access_token"]
     parsed_school_id = _parse_optional_int(school_id)
     parsed_dependent_id = _parse_optional_int(dependent_id)
 
-    if parsed_school_id is not None or parsed_dependent_id is not None:
+    try:
+        tokens, resolved_username, choice_school_id, choice_dependent_id = resolve_form_tokens(
+            base_url=base_url,
+            username=username,
+            password=password,
+            login_choice=login_choice,
+        )
+    except LoginError as exc:
+        logger.warning("MCP OAuth: login P+ falhou para usuário %s: %s", username.strip(), exc)
+        return HTMLResponse(
+            _mcp_login_html(pending=pending, error=str(exc), username=username.strip()),
+            status_code=401,
+        )
+
+    if parsed_school_id is None:
+        parsed_school_id = choice_school_id
+    if parsed_dependent_id is None:
+        parsed_dependent_id = choice_dependent_id
+
+    access_token = tokens["access_token"]
+
+    try:
+        discovered = discover_profile_config(
+            base_url,
+            access_token,
+            interactive=False,
+            school_id=parsed_school_id,
+            dependent_id=parsed_dependent_id,
+        )
+    except ProfileChoiceRequired as exc:
         try:
-            discover_profile_config(
-                base_url,
-                access_token,
-                interactive=False,
+            retry_token = mint_choice_token(
+                tokens,
+                resolved_username,
                 school_id=parsed_school_id,
                 dependent_id=parsed_dependent_id,
             )
-        except ProfileChoiceRequired as exc:
-            return HTMLResponse(
-                _mcp_login_html(
-                    pending=pending,
-                    choice_error={"tipo": exc.choice_type, "opcoes": exc.options},
-                ),
-                status_code=409,
-            )
-        except Exception as exc:
-            return HTMLResponse(
-                _mcp_login_html(
-                    pending=pending,
-                    error=f"Não foi possível carregar o perfil: {exc}",
-                ),
-                status_code=400,
-            )
+        except RuntimeError:
+            retry_token = None
+        return HTMLResponse(
+            _mcp_login_html(
+                pending=pending,
+                username=resolved_username,
+                login_choice=retry_token,
+                choice_error={"tipo": exc.choice_type, "opcoes": exc.options},
+                locked_school_id=parsed_school_id if exc.choice_type != "escola" else None,
+                locked_dependent_id=parsed_dependent_id if exc.choice_type != "dependente" else None,
+            ),
+            status_code=409,
+        )
+    except Exception as exc:
+        return HTMLResponse(
+            _mcp_login_html(
+                pending=pending,
+                username=resolved_username,
+                error=f"Não foi possível carregar o perfil: {exc}",
+            ),
+            status_code=400,
+        )
+
+    selected_school_id = int(discovered["student"]["school_id"])
+    selected_dependent_id = discovered["student"].get("dependent_id")
+    if selected_dependent_id is not None:
+        selected_dependent_id = int(selected_dependent_id)
 
     try:
         redirect_url = provider.complete_login(
@@ -251,12 +283,19 @@ def mcp_login_post(
             poliedro_access_token=access_token,
             poliedro_refresh_token=tokens.get("refresh_token"),
             expires_in=int(tokens.get("expires_in") or 3600),
+            school_id=selected_school_id,
+            dependent_id=selected_dependent_id,
         )
     except ValueError as exc:
         return HTMLResponse(
-            _mcp_login_html(pending=pending, error=str(exc)),
+            _mcp_login_html(pending=pending, error=str(exc), username=resolved_username),
             status_code=400,
         )
+    logger.info(
+        "MCP OAuth: perfil selecionado school_id=%s dependent_id=%s",
+        selected_school_id,
+        selected_dependent_id,
+    )
     return RedirectResponse(redirect_url, status_code=302)
 
 
@@ -265,12 +304,20 @@ def _mcp_login_html(
     pending: str,
     error: str | None = None,
     choice_error: dict[str, Any] | None = None,
+    username: str = "",
+    login_choice: str | None = None,
+    locked_school_id: int | None = None,
+    locked_dependent_id: int | None = None,
 ) -> str:
     return _login_html(
         form_action="/mcp/login",
         pending=pending,
         error=error,
         choice_error=choice_error,
+        username=username,
+        login_choice=login_choice,
+        locked_school_id=locked_school_id,
+        locked_dependent_id=locked_dependent_id,
     )
 
 
