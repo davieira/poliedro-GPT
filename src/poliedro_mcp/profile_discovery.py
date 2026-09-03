@@ -283,6 +283,7 @@ def discover_profile_config(
     profile_role_id = int(school_link["idPerfil"])
 
     student_owner_id = int(user_id)
+    selected_dependent_id: int | None = None
     email_p4ed = claims.get("email")
     origin_id: str | int | None = None
 
@@ -297,6 +298,7 @@ def discover_profile_config(
         )
 
         student_owner_id = int(dependent["id"])
+        selected_dependent_id = student_owner_id
         email_p4ed = dependent.get("emailP4ed") or dependent.get("email")
         origin_id = dependent.get("originId") or dependent.get("originID")
     else:
@@ -330,6 +332,7 @@ def discover_profile_config(
             "enrollment_id": enrollment_id,
             "email_p4ed": str(email_p4ed),
             "role_id": profile_role_id,
+            "dependent_id": selected_dependent_id,
         },
         "calendar": {
             "owner_id": student_owner_id,

@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 from .auth import LoginError, login_with_password, refresh_access_token
 from .logger import logger
+from .mcp_oauth_tokens import mint_login_choice_token, mint_session_access_token, parse_login_choice_token
 from .profile_discovery import ProfileChoiceRequired
 from .user_context import get_base_config
 
@@ -36,6 +37,8 @@ class _TokenBundle:
     expires_in: int
     redirect_uri: str
     client_id: str
+    school_id: int | None = None
+    dependent_id: int | None = None
 
 
 _auth_codes: dict[str, tuple[float, _TokenBundle]] = {}
@@ -133,6 +136,39 @@ def _extract_client_credentials(request: Request, body: dict[str, Any]) -> tuple
     return client_id, client_secret
 
 
+def _choice_options_html(choice_error: dict[str, Any]) -> str:
+    options = choice_error.get("opcoes") or []
+    tipo = str(choice_error.get("tipo") or "opção")
+    field = "school_id" if tipo == "escola" else "dependent_id"
+    radios = []
+    for item in options:
+        value = item.get("school_id") if field == "school_id" else item.get("dependent_id")
+        if value is None:
+            continue
+        name = html.escape(str(item.get("name") or f"ID {value}"))
+        extra = item.get("email_p4ed") or item.get("role_id")
+        hint = f" <span class='hint'>({html.escape(str(extra))})</span>" if extra else ""
+        radios.append(
+            "<label class='choice'>"
+            f"<input type='radio' name='{field}' value='{html.escape(str(value))}' required>"
+            f"<span>{name}{hint}</span>"
+            "</label>"
+        )
+    if not radios:
+        return (
+            f'<p class="error">Escolha necessária ({html.escape(tipo)}), '
+            "mas nenhuma opção válida foi retornada.</p>"
+        )
+    heading = "Escola" if field == "school_id" else "Dependente"
+    article = "uma" if field == "school_id" else "um"
+    return (
+        f'<p class="error">Há mais de {article} {html.escape(heading.lower())} nesta conta. '
+        "Selecione a opção abaixo.</p>"
+        f'<fieldset class="choices"><legend>{html.escape(heading)}</legend>'
+        f"{''.join(radios)}</fieldset>"
+    )
+
+
 def _login_html(
     *,
     client_id: str = "",
@@ -144,10 +180,18 @@ def _login_html(
     pending: str | None = None,
     error: str | None = None,
     choice_error: dict[str, Any] | None = None,
+    username: str = "",
+    login_choice: str | None = None,
+    locked_school_id: int | None = None,
+    locked_dependent_id: int | None = None,
 ) -> str:
     oauth_hidden = ""
     if pending:
         oauth_hidden += f'<input type="hidden" name="pending" value="{html.escape(pending)}">'
+    if login_choice:
+        oauth_hidden += (
+            f'<input type="hidden" name="login_choice" value="{html.escape(login_choice)}">'
+        )
     if client_id:
         oauth_hidden += f'<input type="hidden" name="client_id" value="{html.escape(client_id)}">'
     if redirect_uri:
@@ -160,20 +204,48 @@ def _login_html(
         )
     if scope:
         oauth_hidden += f'<input type="hidden" name="scope" value="{html.escape(scope)}">'
+    if locked_school_id is not None:
+        oauth_hidden += (
+            f'<input type="hidden" name="school_id" value="{html.escape(str(locked_school_id))}">'
+        )
+    if locked_dependent_id is not None:
+        oauth_hidden += (
+            f'<input type="hidden" name="dependent_id" '
+            f'value="{html.escape(str(locked_dependent_id))}">'
+        )
+
     error_block = ""
     if error:
         error_block = f'<p class="error">{html.escape(error)}</p>'
     if choice_error:
-        options = choice_error.get("opcoes") or []
-        tipo = choice_error.get("tipo", "opção")
-        lines = "".join(
-            f"<li><code>{html.escape(str(item))}</code></li>" for item in options
+        error_block += _choice_options_html(choice_error)
+
+    authenticated = bool(login_choice)
+    credentials_block = ""
+    if authenticated:
+        credentials_block = (
+            f'<input type="hidden" name="username" value="{html.escape(username)}">'
+            f'<p class="hint">Conta autenticada: <strong>{html.escape(username)}</strong>. '
+            "Escolha a opção abaixo — não é preciso informar a senha de novo.</p>"
         )
-        error_block += (
-            f'<p class="error">Escolha necessária ({html.escape(tipo)}). '
-            "Informe o ID correspondente abaixo.</p>"
-            f"<ul>{lines}</ul>"
-        )
+    else:
+        credentials_block = f"""
+      <label for="username">Usuário</label>
+      <input id="username" name="username" autocomplete="username" required
+             value="{html.escape(username)}">
+      <label for="password">Senha</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+"""
+
+    show_manual_ids = choice_error is None and not authenticated
+    manual_ids = ""
+    if show_manual_ids:
+        manual_ids = """
+      <label for="school_id">ID da escola (opcional)</label>
+      <input id="school_id" name="school_id" inputmode="numeric" placeholder="Somente se solicitado">
+      <label for="dependent_id">ID do dependente (opcional)</label>
+      <input id="dependent_id" name="dependent_id" inputmode="numeric" placeholder="Contas de responsável">
+"""
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -199,7 +271,10 @@ def _login_html(
     .notice strong {{ color: #1a5fb4; }}
     footer {{ max-width: 420px; margin: 16px auto 48px; text-align: center; font-size: .8rem; color: #666; }}
     footer a {{ color: #1a5fb4; }}
-    ul {{ font-size: .85rem; }}
+    fieldset.choices {{ border: 1px solid #c5d9f0; border-radius: 8px; margin: 0 0 16px; padding: 10px 12px; }}
+    fieldset.choices legend {{ color: #1a5fb4; font-weight: 600; }}
+    label.choice {{ display: flex; gap: 10px; align-items: flex-start; margin: 8px 0; font-size: .95rem; }}
+    label.choice input {{ width: auto; margin: 4px 0 0; }}
   </style>
 </head>
 <body>
@@ -215,14 +290,8 @@ def _login_html(
     {error_block}
     <form method="post" action="{html.escape(form_action)}">
       {oauth_hidden}
-      <label for="username">Usuário</label>
-      <input id="username" name="username" autocomplete="username" required>
-      <label for="password">Senha</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required>
-      <label for="school_id">ID da escola (opcional)</label>
-      <input id="school_id" name="school_id" inputmode="numeric" placeholder="Somente se solicitado">
-      <label for="dependent_id">ID do dependente (opcional)</label>
-      <input id="dependent_id" name="dependent_id" inputmode="numeric" placeholder="Contas de responsável">
+      {credentials_block}
+      {manual_ids}
       <p class="hint">Usuário sem @p4ed.com.</p>
       <button type="submit">Entrar</button>
     </form>
@@ -245,6 +314,8 @@ def _issue_tokens(
     expires_in: int,
     redirect_uri: str,
     client_id: str,
+    school_id: int | None = None,
+    dependent_id: int | None = None,
 ) -> str:
     _purge_expired()
     code = secrets.token_urlsafe(32)
@@ -254,6 +325,8 @@ def _issue_tokens(
         expires_in=expires_in,
         redirect_uri=redirect_uri,
         client_id=client_id,
+        school_id=school_id,
+        dependent_id=dependent_id,
     )
     _auth_codes[code] = (time.time(), bundle)
     return code
@@ -271,6 +344,62 @@ def _parse_optional_int(value: str | None) -> int | None:
         return int(value.strip())
     except ValueError:
         return None
+
+
+def resolve_form_tokens(
+    *,
+    base_url: str,
+    username: str,
+    password: str | None,
+    login_choice: str | None,
+) -> tuple[dict[str, Any], str, int | None, int | None]:
+    """Autentica com senha ou retoma a sessão após escolha de escola/dependente."""
+    if login_choice:
+        choice = parse_login_choice_token(login_choice)
+        if choice is None:
+            raise LoginError("Sessão de escolha expirada. Faça login novamente.")
+        return (
+            {
+                "access_token": choice.access_token,
+                "refresh_token": choice.refresh_token,
+                "expires_in": choice.expires_in,
+            },
+            choice.username,
+            choice.school_id,
+            choice.dependent_id,
+        )
+
+    if not username.strip() or not (password or "").strip():
+        raise LoginError("Usuário e senha são obrigatórios.")
+
+    tokens = login_with_password(base_url, username.strip(), password or "")
+    return tokens, username.strip(), None, None
+
+
+def mint_choice_token(
+    tokens: dict[str, Any],
+    username: str,
+    *,
+    school_id: int | None = None,
+    dependent_id: int | None = None,
+) -> str:
+    return mint_login_choice_token(
+        access_token=str(tokens["access_token"]),
+        refresh_token=tokens.get("refresh_token"),
+        expires_in=int(tokens.get("expires_in") or 3600),
+        username=username,
+        school_id=school_id,
+        dependent_id=dependent_id,
+    )
+
+
+def _session_access_token(bundle: _TokenBundle) -> str:
+    return mint_session_access_token(
+        bundle.access_token,
+        expires_in=bundle.expires_in,
+        school_id=bundle.school_id,
+        dependent_id=bundle.dependent_id,
+    )
 
 
 @router.get("/oauth/authorize")
@@ -308,10 +437,11 @@ def oauth_authorize_post(
     state: str = Form(...),
     response_type: str = Form(default="code"),
     scope: str | None = Form(default=None),
-    username: str = Form(...),
-    password: str = Form(...),
+    username: str = Form(default=""),
+    password: str | None = Form(default=None),
     school_id: str | None = Form(default=None),
     dependent_id: str | None = Form(default=None),
+    login_choice: str | None = Form(default=None),
 ) -> Response:
     """Valida credenciais P+ e redireciona de volta ao ChatGPT com authorization code."""
     effective_client_id = _validate_client_id(client_id)
@@ -325,20 +455,33 @@ def oauth_authorize_post(
     parsed_school_id = _parse_optional_int(school_id)
     parsed_dependent_id = _parse_optional_int(dependent_id)
 
+    def _form(**kwargs: Any) -> str:
+        return _login_html(
+            client_id=effective_client_id,
+            redirect_uri=redirect_uri,
+            state=state,
+            response_type=response_type,
+            scope=scope,
+            **kwargs,
+        )
+
     try:
-        tokens = login_with_password(base_url, username.strip(), password)
+        tokens, resolved_username, choice_school_id, choice_dependent_id = resolve_form_tokens(
+            base_url=base_url,
+            username=username,
+            password=password,
+            login_choice=login_choice,
+        )
     except LoginError as exc:
         return HTMLResponse(
-            _login_html(
-                client_id=effective_client_id,
-                redirect_uri=redirect_uri,
-                state=state,
-                response_type=response_type,
-                scope=scope,
-                error=str(exc),
-            ),
+            _form(error=str(exc), username=username.strip()),
             status_code=401,
         )
+
+    if parsed_school_id is None:
+        parsed_school_id = choice_school_id
+    if parsed_dependent_id is None:
+        parsed_dependent_id = choice_dependent_id
 
     access_token = tokens["access_token"]
     refresh_token = tokens.get("refresh_token")
@@ -347,7 +490,7 @@ def oauth_authorize_post(
     try:
         from .profile_discovery import discover_profile_config
 
-        discover_profile_config(
+        discovered = discover_profile_config(
             base_url,
             access_token,
             interactive=False,
@@ -355,29 +498,38 @@ def oauth_authorize_post(
             dependent_id=parsed_dependent_id,
         )
     except ProfileChoiceRequired as exc:
+        try:
+            retry_token = mint_choice_token(
+                tokens,
+                resolved_username,
+                school_id=parsed_school_id,
+                dependent_id=parsed_dependent_id,
+            )
+        except RuntimeError:
+            retry_token = None
         return HTMLResponse(
-            _login_html(
-                client_id=effective_client_id,
-                redirect_uri=redirect_uri,
-                state=state,
-                response_type=response_type,
-                scope=scope,
+            _form(
+                username=resolved_username,
+                login_choice=retry_token,
                 choice_error={"tipo": exc.choice_type, "opcoes": exc.options},
+                locked_school_id=parsed_school_id if exc.choice_type != "escola" else None,
+                locked_dependent_id=parsed_dependent_id if exc.choice_type != "dependente" else None,
             ),
             status_code=409,
         )
     except Exception as exc:
         return HTMLResponse(
-            _login_html(
-                client_id=effective_client_id,
-                redirect_uri=redirect_uri,
-                state=state,
-                response_type=response_type,
-                scope=scope,
+            _form(
+                username=resolved_username,
                 error=f"Não foi possível carregar o perfil: {exc}",
             ),
             status_code=400,
         )
+
+    selected_school_id = int(discovered["student"]["school_id"])
+    selected_dependent_id = discovered["student"].get("dependent_id")
+    if selected_dependent_id is not None:
+        selected_dependent_id = int(selected_dependent_id)
 
     code = _issue_tokens(
         access_token=access_token,
@@ -385,9 +537,16 @@ def oauth_authorize_post(
         expires_in=expires_in,
         redirect_uri=redirect_uri,
         client_id=effective_client_id,
+        school_id=selected_school_id,
+        dependent_id=selected_dependent_id,
     )
 
-    logger.info("OAuth login concluído para usuário=%s", username.strip())
+    logger.info(
+        "OAuth login concluído para usuário=%s school_id=%s dependent_id=%s",
+        resolved_username,
+        selected_school_id,
+        selected_dependent_id,
+    )
     return _redirect_with_code(redirect_uri, code, state)
 
 
@@ -430,7 +589,7 @@ async def oauth_token(request: Request) -> JSONResponse:
             _store_refresh_bundle(refresh_key, bundle)
 
         return JSONResponse({
-            "access_token": bundle.access_token,
+            "access_token": _session_access_token(bundle),
             "token_type": "bearer",
             "expires_in": bundle.expires_in,
             **({"refresh_token": refresh_key} if refresh_key else {}),
@@ -463,13 +622,15 @@ async def oauth_token(request: Request) -> JSONResponse:
             expires_in=int(tokens.get("expires_in") or bundle.expires_in),
             redirect_uri=bundle.redirect_uri,
             client_id=bundle.client_id,
+            school_id=bundle.school_id,
+            dependent_id=bundle.dependent_id,
         )
         new_refresh_key = secrets.token_urlsafe(32)
         _refresh_tokens.pop(refresh_key, None)
         _store_refresh_bundle(new_refresh_key, new_bundle)
 
         return JSONResponse({
-            "access_token": new_bundle.access_token,
+            "access_token": _session_access_token(new_bundle),
             "token_type": "bearer",
             "expires_in": new_bundle.expires_in,
             "refresh_token": new_refresh_key,
