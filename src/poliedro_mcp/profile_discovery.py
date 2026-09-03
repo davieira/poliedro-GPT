@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from datetime import datetime
 from typing import Any
 
@@ -13,6 +14,9 @@ ROLE_ALUNO = 2
 ROLE_RESPONSAVEL = 10
 CALENDAR_ROLE_ALUNO = 2
 DEFAULT_TIMEZONE = "America/Sao_Paulo"
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 
 class ProfileDiscoveryError(RuntimeError):
@@ -50,6 +54,7 @@ def _api_headers(access_token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {access_token}",
         "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "pt",
         "Origin": "https://pmais.p4ed.com",
         "Referer": "https://pmais.p4ed.com/",
         "application-id": "1",
@@ -102,14 +107,40 @@ def _post_json(
         return None
 
 
-def _user_uuid(claims: dict[str, Any]) -> str | None:
-    sub = claims.get("sub")
-    if isinstance(sub, str) and "-" in sub:
-        return sub
+def _looks_like_uuid(value: Any) -> bool:
+    return isinstance(value, str) and bool(_UUID_RE.match(value.strip()))
+
+
+def _candidate_user_ids(claims: dict[str, Any], me: dict[str, Any] | None = None) -> list[str]:
+    """IDs do P+ para /me e /perfil — nunca o `sub` do Keycloak (é outro UUID)."""
+    ordered: list[str] = []
+
+    def add(value: Any) -> None:
+        if value is None or value == "":
+            return
+        text = str(value).strip()
+        if text and text not in ordered:
+            ordered.append(text)
+
+    if me:
+        add(me.get("userId"))
+        add(me.get("id"))
+    add(claims.get("idUsuario"))
     for key in ("userId", "userid"):
-        value = claims.get(key)
-        if isinstance(value, str) and "-" in value:
-            return value
+        add(claims.get(key))
+    return ordered
+
+
+def _try_get_paths(
+    base_url: str,
+    access_token: str,
+    paths: list[str],
+) -> Any | None:
+    for path in paths:
+        try:
+            return _get(base_url, access_token, path)
+        except ProfileDiscoveryError:
+            continue
     return None
 
 
@@ -124,23 +155,49 @@ def _unwrap_me_payload(data: Any) -> dict[str, Any] | None:
     return data
 
 
-def _try_fetch_perfil(
+def _try_fetch_me(
     base_url: str,
     access_token: str,
     claims: dict[str, Any],
 ) -> dict[str, Any] | None:
-    uuid = _user_uuid(claims)
-    if not uuid:
-        return None
-    try:
-        data = _get(base_url, access_token, f"/pmais/api/v2/perfil/get/user/{uuid}")
-    except ProfileDiscoveryError:
-        logger.info("GET /pmais/api/v2/perfil/get/user/{id} falhou")
-        return None
-    if not isinstance(data, dict):
-        return None
-    logger.info("Perfil v2 get/user: escolas=%s", len(data.get("escolas") or []))
-    return data
+    for ident in _candidate_user_ids(claims):
+        data = _try_get_paths(
+            base_url,
+            access_token,
+            [
+                f"/pmais/api/v2/usuario/{ident}/me",
+                f"/pmais/api/v2//usuario/{ident}/me",
+            ],
+        )
+        payload = _unwrap_me_payload(data) if data is not None else None
+        if payload:
+            logger.info(
+                "Perfil v2 /me: escolas=%s dependentes=%s",
+                len(payload.get("escolas") or []),
+                len(payload.get("dependentes") or []),
+            )
+            return payload
+    logger.info("GET /pmais/api/v2/usuario/{id}/me indisponível")
+    return None
+
+
+def _try_fetch_perfil(
+    base_url: str,
+    access_token: str,
+    claims: dict[str, Any],
+    me: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    for ident in _candidate_user_ids(claims, me):
+        data = _try_get_paths(
+            base_url,
+            access_token,
+            [f"/pmais/api/v2/perfil/get/user/{ident}"],
+        )
+        if isinstance(data, dict) and (data.get("escolas") is not None or data.get("userId")):
+            logger.info("Perfil v2 get/user: escolas=%s", len(data.get("escolas") or []))
+            return data
+    logger.info("GET /pmais/api/v2/perfil/get/user/{id} indisponível")
+    return None
 
 
 def _set_selected_profile(
@@ -188,29 +245,6 @@ def _school_links_from_perfil(perfil: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return _normalize_school_links(links)
-
-
-def _try_fetch_me(
-    base_url: str,
-    access_token: str,
-    claims: dict[str, Any],
-) -> dict[str, Any] | None:
-    uuid = _user_uuid(claims)
-    if not uuid:
-        return None
-    try:
-        data = _get(base_url, access_token, f"/pmais/api/v2/usuario/{uuid}/me")
-    except ProfileDiscoveryError:
-        logger.info("GET /pmais/api/v2/usuario/{id}/me falhou; usando escolausuario/all")
-        return None
-    payload = _unwrap_me_payload(data)
-    if payload:
-        logger.info(
-            "Perfil v2 /me: escolas=%s dependentes=%s",
-            len(payload.get("escolas") or []),
-            len(payload.get("dependentes") or []),
-        )
-    return payload
 
 
 def _as_optional_int(value: Any) -> int | None:
@@ -567,13 +601,17 @@ def discover_profile_config(
         raise ProfileDiscoveryError("Token sem idUsuario.")
 
     me = _try_fetch_me(base_url, access_token, claims)
-    perfil = _try_fetch_perfil(base_url, access_token, claims)
+    perfil = _try_fetch_perfil(base_url, access_token, claims, me)
 
     school_links = _school_links_from_perfil(perfil) if perfil else []
     if not school_links and me:
         school_links = _school_links_from_me(me)
     if not school_links:
-        school_links = _list_school_links(base_url, access_token, int(user_id))
+        raise ProfileDiscoveryError(
+            "Não foi possível ler a escola no perfil P+ "
+            "(/usuario/{id}/me e /perfil/get/user). "
+            "O JWT do Keycloak não usa o mesmo userId do portal."
+        )
 
     school_link = _select_school_link(
         school_links,
@@ -601,8 +639,8 @@ def discover_profile_config(
     if profile_role_id == ROLE_RESPONSAVEL:
         dependents = _dependents_from_me(me) if me else []
         if not dependents:
-            dependents = _list_dependents(
-                base_url, access_token, int(user_id), school_id
+            raise ProfileDiscoveryError(
+                "Conta de responsável sem dependentes no /me do P+."
             )
         dependent = _select_dependent(
             dependents,
