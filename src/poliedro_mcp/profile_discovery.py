@@ -261,6 +261,33 @@ def _try_fetch_perfil(
     return None
 
 
+def _try_fetch_student_me(
+    base_url: str,
+    access_token: str,
+    dependent: dict[str, Any],
+) -> dict[str, Any] | None:
+    ids: list[str] = []
+    for value in (dependent.get("userId"), dependent.get("id")):
+        if value is None or str(value).strip() == "":
+            continue
+        text = str(value).strip()
+        if text not in ids:
+            ids.append(text)
+    for ident in ids:
+        data = _try_get_paths(
+            base_url,
+            access_token,
+            [
+                f"/pmais/api/v2/usuario/{ident}/me",
+                f"/pmais/api/v2//usuario/{ident}/me",
+            ],
+        )
+        payload = _unwrap_me_payload(data) if data is not None else None
+        if payload and payload.get("escolas") is not None:
+            return payload
+    return None
+
+
 def _set_selected_profile(
     base_url: str,
     access_token: str,
@@ -367,18 +394,62 @@ def _school_links_from_me(me: dict[str, Any]) -> list[dict[str, Any]]:
     return _normalize_school_links(links)
 
 
-def _enrollment_from_dep_escolas(escolas: Any) -> tuple[int | None, int | None]:
-    if not isinstance(escolas, list):
-        return None, None
-    for vinculo in escolas:
+def _iter_dicts(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        yield obj
+        for value in obj.values():
+            yield from _iter_dicts(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            yield from _iter_dicts(item)
+
+
+def _turmas_from(obj: Any) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    for item in _iter_dicts(obj):
+        turma = item.get("turma")
+        candidates = []
+        if isinstance(turma, dict):
+            candidates.append(turma)
+        elif isinstance(turma, list):
+            candidates.extend(t for t in turma if isinstance(t, dict))
+        if item.get("anoLetivo") is not None and item.get("idOrigem") is not None:
+            candidates.append(item)
+        for turma_obj in candidates:
+            enrollment = _as_optional_int(turma_obj.get("idOrigem"))
+            year = _as_optional_int(turma_obj.get("anoLetivo"))
+            if enrollment is None and year is None:
+                continue
+            found.append({"enrollmentId": enrollment, "schoolYear": year})
+    return found
+
+
+def _enrollment_from_dep_escolas(
+    escolas: Any,
+    *,
+    school_id: int | None = None,
+) -> tuple[int | None, int | None]:
+    """enrollmentId do boletim é turma.idOrigem, não o campo matricula (ex.: 010547114)."""
+    vinculos = escolas if isinstance(escolas, list) else [escolas] if isinstance(escolas, dict) else []
+    ranked: list[tuple[int, int | None, int | None]] = []
+    for vinculo in vinculos:
         if not isinstance(vinculo, dict) or vinculo.get("excluido") is True:
             continue
-        turma = vinculo.get("turma") if isinstance(vinculo.get("turma"), dict) else {}
-        enrollment = _as_optional_int(turma.get("idOrigem") or vinculo.get("matricula"))
-        year = _as_optional_int(turma.get("anoLetivo"))
-        if enrollment is not None or year is not None:
-            return enrollment, year
-    return None, None
+        if school_id is not None:
+            vinculo_school = _as_optional_int(vinculo.get("idEscola"))
+            if vinculo_school is not None and vinculo_school != school_id:
+                continue
+        for turma in _turmas_from(vinculo):
+            year = turma["schoolYear"]
+            ranked.append((year or 0, turma["enrollmentId"], year))
+    if not ranked:
+        for turma in _turmas_from(escolas):
+            year = turma["schoolYear"]
+            ranked.append((year or 0, turma["enrollmentId"], year))
+    if not ranked:
+        return None, None
+    _score, enrollment, year = max(ranked, key=lambda item: item[0])
+    return enrollment, year
 
 
 def _dependents_from_me(me: dict[str, Any]) -> list[dict[str, Any]]:
@@ -394,6 +465,7 @@ def _dependents_from_me(me: dict[str, Any]) -> list[dict[str, Any]]:
         normalized.append(
             {
                 "id": dependent_id,
+                "userId": dep.get("userId"),
                 "name": dep.get("nome") or dep.get("name"),
                 "emailP4ed": dep.get("emailp4ed") or dep.get("emailP4ed") or dep.get("email"),
                 "originId": dep.get("idOrigem") or dep.get("originId") or dep.get("originID"),
@@ -527,33 +599,43 @@ def _grade_years(
         params["originId"] = str(origin_id)
     if school_id is not None:
         params["schoolId"] = school_id
-    return _get(base_url, access_token, "/pmais/api/v1/gradeStudentReport/years", params=params)
+    data = _get(base_url, access_token, "/pmais/api/v1/gradeStudentReport/years", params=params)
+    if isinstance(data, dict) and isinstance(data.get("data"), dict):
+        nested = data["data"]
+        if nested.get("years") is not None or nested.get("classes") is not None:
+            return nested
+    return data if isinstance(data, dict) else {}
 
 
-def _resolve_school_year(years_payload: dict[str, Any]) -> tuple[int, int]:
-    years = years_payload.get("years") or []
+def _coerce_year_list(values: Any) -> list[int]:
+    years: list[int] = []
+    for value in values or []:
+        year = _as_optional_int(value if not isinstance(value, dict) else value.get("year") or value.get("anoLetivo"))
+        if year is not None and year not in years:
+            years.append(year)
+    return years
+
+
+def _resolve_school_year(years_payload: dict[str, Any]) -> tuple[int | None, int | None]:
+    years = _coerce_year_list(years_payload.get("years"))
     classes = years_payload.get("classes") or []
     if not years:
-        raise ProfileDiscoveryError("Não foi possível obter anos letivos do aluno.")
+        return None, None
 
     current_year = datetime.now().year
-    if current_year in years:
-        school_year = current_year
-    else:
-        school_year = max(years)
+    school_year = current_year if current_year in years else max(years)
 
     enrollment_id: int | None = None
     for item in classes:
-        if item.get("year") == school_year:
-            enrollment_id = item.get("enrollmentId")
+        if not isinstance(item, dict):
+            continue
+        if _as_optional_int(item.get("year") or item.get("anoLetivo")) == school_year:
+            enrollment_id = _as_optional_int(item.get("enrollmentId") or item.get("idOrigem"))
             break
+    if enrollment_id is None and len(classes) == 1 and isinstance(classes[0], dict):
+        enrollment_id = _as_optional_int(classes[0].get("enrollmentId") or classes[0].get("idOrigem"))
 
-    if enrollment_id is None:
-        raise ProfileDiscoveryError(
-            f"Matrícula (enrollmentId) não encontrada para o ano letivo {school_year}."
-        )
-
-    return school_year, int(enrollment_id)
+    return school_year, enrollment_id
 
 
 def _select_school_link(
@@ -715,10 +797,36 @@ def discover_profile_config(
         origin_id = dependent.get("originId") or dependent.get("originID")
         enrollment_id = _as_optional_int(dependent.get("enrollmentId"))
         school_year = _as_optional_int(dependent.get("schoolYear"))
+        if (enrollment_id is None or school_year is None) and me:
+            extra_enroll, extra_year = _enrollment_from_dep_escolas(
+                me,
+                school_id=school_id,
+            )
+            enrollment_id = enrollment_id or extra_enroll
+            school_year = school_year or extra_year
+        if enrollment_id is None or school_year is None:
+            student_me = _try_fetch_student_me(base_url, access_token, dependent)
+            if student_me:
+                extra_enroll, extra_year = _enrollment_from_dep_escolas(
+                    student_me.get("escolas") or student_me,
+                    school_id=school_id,
+                )
+                enrollment_id = enrollment_id or extra_enroll
+                school_year = school_year or extra_year
+                email_p4ed = (
+                    student_me.get("emailp4ed")
+                    or student_me.get("emailP4ed")
+                    or email_p4ed
+                )
+                origin_id = student_me.get("idOrigem") or student_me.get("originId") or origin_id
     else:
         if me:
             email_p4ed = me.get("emailp4ed") or me.get("emailP4ed") or email_p4ed
             origin_id = me.get("idOrigem") or me.get("originId") or origin_id
+            enrollment_id, school_year = _enrollment_from_dep_escolas(
+                me.get("escolas") or me,
+                school_id=school_id,
+            )
         else:
             user_data = _get(
                 base_url,
@@ -733,14 +841,28 @@ def discover_profile_config(
         raise ProfileDiscoveryError("Não foi possível determinar o email P4ED do aluno.")
 
     if enrollment_id is None or school_year is None:
-        years_payload = _grade_years(
-            base_url,
-            access_token,
-            email_p4ed=str(email_p4ed),
-            origin_id=origin_id,
-            school_id=school_id,
+        try:
+            years_payload = _grade_years(
+                base_url,
+                access_token,
+                email_p4ed=str(email_p4ed),
+                origin_id=origin_id,
+                school_id=school_id,
+            )
+            years_year, years_enrollment = _resolve_school_year(years_payload)
+            school_year = school_year or years_year
+            enrollment_id = enrollment_id or years_enrollment
+        except ProfileDiscoveryError as exc:
+            logger.warning("gradeStudentReport/years indisponível: %s", exc)
+
+    if school_year is None and enrollment_id is not None:
+        school_year = datetime.now().year
+        logger.info("Ano letivo ausente na API; usando %s", school_year)
+
+    if enrollment_id is None or school_year is None:
+        raise ProfileDiscoveryError(
+            "Não foi possível obter ano letivo e matrícula (turma.idOrigem) do aluno."
         )
-        school_year, enrollment_id = _resolve_school_year(years_payload)
 
     return {
         "auth": {"username": str(username)},
