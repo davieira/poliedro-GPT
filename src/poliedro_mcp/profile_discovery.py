@@ -131,7 +131,56 @@ def _candidate_user_ids(claims: dict[str, Any], me: dict[str, Any] | None = None
     return ordered
 
 
-def _try_get_paths(
+def _find_pmais_user_uuid(obj: Any) -> str | None:
+    if isinstance(obj, dict):
+        for key in ("userId", "userid", "user_id"):
+            value = obj.get(key)
+            if _looks_like_uuid(value):
+                return str(value).strip()
+        for value in obj.values():
+            found = _find_pmais_user_uuid(value)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find_pmais_user_uuid(item)
+            if found:
+                return found
+    return None
+
+
+def _lookup_pmais_user_uuid(
+    base_url: str,
+    access_token: str,
+    id_usuario: int,
+) -> str | None:
+    """O POST /login devolve userId UUID; o JWT só tem idUsuario. Busca o UUID."""
+    paths = [
+        f"/pmais/api/v1/user/{id_usuario}",
+        f"/pmais/api/v1/user/get/{id_usuario}",
+        f"/pmais/api/v2/usuario/{id_usuario}",
+    ]
+    for path in paths:
+        data = _try_get_paths(base_url, access_token, [path])
+        uuid = _find_pmais_user_uuid(data) if data is not None else None
+        if uuid:
+            logger.info("userId P+ resolvido via %s", path)
+            return uuid
+
+    try:
+        data = _get(
+            base_url,
+            access_token,
+            "/pmais/api/v1/escolausuario/all",
+            params={"idUsuario": id_usuario, "page": 1, "limit": 1},
+        )
+    except ProfileDiscoveryError:
+        data = None
+    uuid = _find_pmais_user_uuid(data) if data is not None else None
+    if uuid:
+        logger.info("userId P+ resolvido via escolausuario/all (somente UUID)")
+        return uuid
+    return None
     base_url: str,
     access_token: str,
     paths: list[str],
@@ -160,7 +209,14 @@ def _try_fetch_me(
     access_token: str,
     claims: dict[str, Any],
 ) -> dict[str, Any] | None:
-    for ident in _candidate_user_ids(claims):
+    ids = _candidate_user_ids(claims)
+    id_usuario = claims.get("idUsuario")
+    if id_usuario is not None:
+        uuid = _lookup_pmais_user_uuid(base_url, access_token, int(id_usuario))
+        if uuid:
+            ids = [uuid] + [item for item in ids if item != uuid]
+
+    for ident in ids:
         data = _try_get_paths(
             base_url,
             access_token,
@@ -170,7 +226,9 @@ def _try_fetch_me(
             ],
         )
         payload = _unwrap_me_payload(data) if data is not None else None
-        if payload:
+        if payload and (
+            payload.get("escolas") is not None or payload.get("dependentes") is not None
+        ):
             logger.info(
                 "Perfil v2 /me: escolas=%s dependentes=%s",
                 len(payload.get("escolas") or []),
