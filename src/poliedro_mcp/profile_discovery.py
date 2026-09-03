@@ -149,6 +149,19 @@ def _find_pmais_user_uuid(obj: Any) -> str | None:
     return None
 
 
+def _try_get_paths(
+    base_url: str,
+    access_token: str,
+    paths: list[str],
+) -> Any | None:
+    for path in paths:
+        try:
+            return _get(base_url, access_token, path)
+        except ProfileDiscoveryError:
+            continue
+    return None
+
+
 def _lookup_pmais_user_uuid(
     base_url: str,
     access_token: str,
@@ -180,16 +193,6 @@ def _lookup_pmais_user_uuid(
     if uuid:
         logger.info("userId P+ resolvido via escolausuario/all (somente UUID)")
         return uuid
-    return None
-    base_url: str,
-    access_token: str,
-    paths: list[str],
-) -> Any | None:
-    for path in paths:
-        try:
-            return _get(base_url, access_token, path)
-        except ProfileDiscoveryError:
-            continue
     return None
 
 
