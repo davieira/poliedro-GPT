@@ -111,24 +111,39 @@ def _looks_like_uuid(value: Any) -> bool:
     return isinstance(value, str) and bool(_UUID_RE.match(value.strip()))
 
 
-def _candidate_user_ids(claims: dict[str, Any], me: dict[str, Any] | None = None) -> list[str]:
-    """IDs do P+ para /me e /perfil — nunca o `sub` do Keycloak (é outro UUID)."""
+def _candidate_user_ids(
+    claims: dict[str, Any],
+    me: dict[str, Any] | None = None,
+    *,
+    pmais_uuid: str | None = None,
+) -> list[str]:
+    """IDs do P+ para /me e /perfil — nunca o `sub` do Keycloak nem idUsuario numérico."""
     ordered: list[str] = []
 
     def add(value: Any) -> None:
-        if value is None or value == "":
+        if not _looks_like_uuid(value):
             return
         text = str(value).strip()
-        if text and text not in ordered:
+        if text not in ordered:
             ordered.append(text)
 
-    if me:
+    add(pmais_uuid)
+    if me and _payload_matches_user(me, claims):
         add(me.get("userId"))
-        add(me.get("id"))
-    add(claims.get("idUsuario"))
     for key in ("userId", "userid"):
         add(claims.get(key))
     return ordered
+
+
+def _payload_matches_user(payload: dict[str, Any], claims: dict[str, Any]) -> bool:
+    claimed = claims.get("idUsuario")
+    payload_id = payload.get("id")
+    if claimed is not None and payload_id is not None:
+        try:
+            return int(payload_id) == int(claimed)
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 def _find_pmais_user_uuid(obj: Any) -> str | None:
@@ -162,12 +177,33 @@ def _try_get_paths(
     return None
 
 
+def _try_login_external(base_url: str, access_token: str) -> dict[str, Any] | None:
+    """Troca o JWT do Keycloak pelo perfil P+ (userId UUID + escolas), como o portal."""
+    try:
+        data = _post_json(
+            base_url,
+            access_token,
+            "/pmais/api/v1/login-external",
+            {"accessToken": access_token},
+        )
+    except ProfileDiscoveryError as exc:
+        logger.warning("login-external falhou: %s", exc)
+        return None
+    if not isinstance(data, dict) or not _looks_like_uuid(data.get("userId")):
+        return None
+    logger.info(
+        "login-external ok userId P+ escolas=%s",
+        len(data.get("escolas") or []),
+    )
+    return data
+
+
 def _lookup_pmais_user_uuid(
     base_url: str,
     access_token: str,
     id_usuario: int,
 ) -> str | None:
-    """O POST /login devolve userId UUID; o JWT só tem idUsuario. Busca o UUID."""
+    """Fallback se /login-external não estiver disponível."""
     paths = [
         f"/pmais/api/v1/user/{id_usuario}",
         f"/pmais/api/v1/user/get/{id_usuario}",
@@ -175,24 +211,10 @@ def _lookup_pmais_user_uuid(
     ]
     for path in paths:
         data = _try_get_paths(base_url, access_token, [path])
-        uuid = _find_pmais_user_uuid(data) if data is not None else None
-        if uuid:
+        found = _find_pmais_user_uuid(data) if data is not None else None
+        if found:
             logger.info("userId P+ resolvido via %s", path)
-            return uuid
-
-    try:
-        data = _get(
-            base_url,
-            access_token,
-            "/pmais/api/v1/escolausuario/all",
-            params={"idUsuario": id_usuario, "page": 1, "limit": 1},
-        )
-    except ProfileDiscoveryError:
-        data = None
-    uuid = _find_pmais_user_uuid(data) if data is not None else None
-    if uuid:
-        logger.info("userId P+ resolvido via escolausuario/all (somente UUID)")
-        return uuid
+            return found
     return None
 
 
@@ -211,14 +233,10 @@ def _try_fetch_me(
     base_url: str,
     access_token: str,
     claims: dict[str, Any],
+    *,
+    pmais_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    ids = _candidate_user_ids(claims)
-    id_usuario = claims.get("idUsuario")
-    if id_usuario is not None:
-        uuid = _lookup_pmais_user_uuid(base_url, access_token, int(id_usuario))
-        if uuid:
-            ids = [uuid] + [item for item in ids if item != uuid]
-
+    ids = _candidate_user_ids(claims, pmais_uuid=pmais_uuid)
     for ident in ids:
         data = _try_get_paths(
             base_url,
@@ -229,15 +247,16 @@ def _try_fetch_me(
             ],
         )
         payload = _unwrap_me_payload(data) if data is not None else None
-        if payload and (
-            payload.get("escolas") is not None or payload.get("dependentes") is not None
-        ):
-            logger.info(
-                "Perfil v2 /me: escolas=%s dependentes=%s",
-                len(payload.get("escolas") or []),
-                len(payload.get("dependentes") or []),
-            )
-            return payload
+        if not payload or not _payload_matches_user(payload, claims):
+            continue
+        if not (payload.get("escolas") or payload.get("dependentes")):
+            continue
+        logger.info(
+            "Perfil v2 /me: escolas=%s dependentes=%s",
+            len(payload.get("escolas") or []),
+            len(payload.get("dependentes") or []),
+        )
+        return payload
     logger.info("GET /pmais/api/v2/usuario/{id}/me indisponível")
     return None
 
@@ -247,16 +266,21 @@ def _try_fetch_perfil(
     access_token: str,
     claims: dict[str, Any],
     me: dict[str, Any] | None = None,
+    *,
+    pmais_uuid: str | None = None,
 ) -> dict[str, Any] | None:
-    for ident in _candidate_user_ids(claims, me):
+    for ident in _candidate_user_ids(claims, me, pmais_uuid=pmais_uuid):
         data = _try_get_paths(
             base_url,
             access_token,
             [f"/pmais/api/v2/perfil/get/user/{ident}"],
         )
-        if isinstance(data, dict) and (data.get("escolas") is not None or data.get("userId")):
-            logger.info("Perfil v2 get/user: escolas=%s", len(data.get("escolas") or []))
-            return data
+        if not isinstance(data, dict) or not data.get("escolas"):
+            continue
+        if not _payload_matches_user(data, claims):
+            continue
+        logger.info("Perfil v2 get/user: escolas=%s", len(data.get("escolas") or []))
+        return data
     logger.info("GET /pmais/api/v2/perfil/get/user/{id} indisponível")
     return None
 
@@ -310,6 +334,37 @@ def _set_selected_profile(
         )
     except ProfileDiscoveryError as exc:
         logger.warning("setSelectedProfile falhou: %s", exc)
+
+
+def _school_links_from_login_external(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    roles: dict[int, int] = {}
+    for item in payload.get("perfis_escola") or []:
+        if not isinstance(item, dict) or item.get("idEscola") is None:
+            continue
+        perfil = item.get("perfil") or {}
+        role = perfil.get("id") if isinstance(perfil, dict) else None
+        if role is None:
+            continue
+        roles[int(item["idEscola"])] = int(role)
+    links: list[dict[str, Any]] = []
+    for item in payload.get("escolas") or []:
+        if not isinstance(item, dict):
+            continue
+        school_id = item.get("idEscola") if item.get("idEscola") is not None else item.get("id")
+        if school_id is None:
+            continue
+        school_id = int(school_id)
+        links.append(
+            {
+                "idEscola": school_id,
+                "idPerfil": roles.get(school_id, ROLE_ALUNO),
+                "idEscolaUsuario": item.get("idEscolaUsuario"),
+                "nome": item.get("nome"),
+                "statusEscola": item.get("statusEscola"),
+                "usuario": {"nome": item.get("nome")},
+            }
+        )
+    return _normalize_school_links(links)
 
 
 def _school_links_from_perfil(perfil: dict[str, Any]) -> list[dict[str, Any]]:
@@ -743,17 +798,29 @@ def discover_profile_config(
     if not user_id:
         raise ProfileDiscoveryError("Token sem idUsuario.")
 
-    me = _try_fetch_me(base_url, access_token, claims)
-    perfil = _try_fetch_perfil(base_url, access_token, claims, me)
+    session = _try_login_external(base_url, access_token)
+    pmais_uuid = (
+        str(session["userId"]).strip()
+        if session and _looks_like_uuid(session.get("userId"))
+        else None
+    )
+    if pmais_uuid is None and user_id is not None:
+        pmais_uuid = _lookup_pmais_user_uuid(base_url, access_token, int(user_id))
+
+    me = _try_fetch_me(base_url, access_token, claims, pmais_uuid=pmais_uuid)
+    perfil = _try_fetch_perfil(
+        base_url, access_token, claims, me, pmais_uuid=pmais_uuid
+    )
 
     school_links = _school_links_from_perfil(perfil) if perfil else []
     if not school_links and me:
         school_links = _school_links_from_me(me)
+    if not school_links and session:
+        school_links = _school_links_from_login_external(session)
     if not school_links:
         raise ProfileDiscoveryError(
             "Não foi possível ler a escola no perfil P+ "
-            "(/usuario/{id}/me e /perfil/get/user). "
-            "O JWT do Keycloak não usa o mesmo userId do portal."
+            "(/login-external, /perfil/get/user e /usuario/{id}/me)."
         )
 
     school_link = _select_school_link(
