@@ -221,6 +221,10 @@ def _login_html(
     choice_error: dict[str, Any] | None = None,
     code_challenge: str | None = None,
     code_challenge_method: str | None = None,
+    username: str = "",
+    login_choice: str | None = None,
+    locked_school_id: int | None = None,
+    locked_dependent_id: int | None = None,
 ) -> str:
     oauth_hidden = ""
     if pending:
@@ -249,6 +253,15 @@ def _login_html(
         oauth_hidden += (
             '<input type="hidden" name="code_challenge_method" '
             f'value="{html.escape(code_challenge_method)}">'
+        )
+    if locked_school_id is not None:
+        oauth_hidden += (
+            f'<input type="hidden" name="school_id" value="{html.escape(str(locked_school_id))}">'
+        )
+    if locked_dependent_id is not None:
+        oauth_hidden += (
+            f'<input type="hidden" name="dependent_id" '
+            f'value="{html.escape(str(locked_dependent_id))}">'
         )
     error_block = ""
     if error:
