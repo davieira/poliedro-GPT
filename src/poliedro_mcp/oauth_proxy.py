@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request, status
+from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from .auth import LoginError, login_with_password, refresh_access_token
@@ -46,6 +46,8 @@ class _TokenBundle:
     client_id: str
     code_challenge: str | None = None
     code_challenge_method: str | None = None
+    school_id: int | None = None
+    dependent_id: int | None = None
 
 
 _auth_codes: dict[str, tuple[float, _TokenBundle]] = {}
@@ -109,20 +111,30 @@ def _validate_redirect_uri(redirect_uri: str) -> None:
     )
 
 
+def _secure_str_eq(left: str, right: str) -> bool:
+    """compare_digest exige o mesmo tamanho — senão vira 500 no authorize do ChatGPT."""
+    left_b = left.encode("utf-8")
+    right_b = right.encode("utf-8")
+    if len(left_b) != len(right_b):
+        secrets.compare_digest(left_b, left_b)
+        return False
+    return secrets.compare_digest(left_b, right_b)
+
+
 def _verify_pkce(code_verifier: str, challenge: str, method: str) -> bool:
     method = (method or "S256").strip()
     if method == "plain":
-        return secrets.compare_digest(code_verifier, challenge)
+        return _secure_str_eq(code_verifier, challenge)
     if method.upper() != "S256":
         return False
     digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
     computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    return secrets.compare_digest(computed, challenge)
+    return _secure_str_eq(computed, challenge)
 
 
 def _validate_client_id(client_id: str | None) -> str:
     effective = _effective_client_id(client_id)
-    if not secrets.compare_digest(effective, _oauth_client_id()):
+    if not _secure_str_eq(effective, _oauth_client_id()):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="client_id inválido.",
@@ -132,7 +144,7 @@ def _validate_client_id(client_id: str | None) -> str:
 
 def _validate_client_secret(client_secret: str) -> None:
     expected = _oauth_client_secret()
-    if not secrets.compare_digest(client_secret, expected):
+    if not _secure_str_eq(client_secret, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="client_secret inválido.",
@@ -340,6 +352,8 @@ def _issue_tokens(
     client_id: str,
     code_challenge: str | None = None,
     code_challenge_method: str | None = None,
+    school_id: int | None = None,
+    dependent_id: int | None = None,
 ) -> str:
     _purge_expired()
     code = secrets.token_urlsafe(32)
@@ -351,6 +365,8 @@ def _issue_tokens(
         client_id=client_id,
         code_challenge=code_challenge or None,
         code_challenge_method=code_challenge_method or None,
+        school_id=school_id,
+        dependent_id=dependent_id,
     )
     _auth_codes[code] = (time.time(), bundle)
     return code
@@ -426,20 +442,20 @@ def _session_access_token(bundle: _TokenBundle) -> str:
     )
 
 
-@router.get("/oauth/authorize")
-def oauth_authorize_get(
-    request: Request,
-    redirect_uri: str | None = Query(default=None),
-    state: str | None = Query(default=None),
-    response_type: str = Query(default="code"),
-    client_id: str = Query(default=""),
-    scope: str | None = Query(default=None),
-    code_challenge: str | None = Query(default=None),
-    code_challenge_method: str | None = Query(default=None),
-) -> HTMLResponse:
+@router.api_route("/oauth/authorize", methods=["GET", "HEAD"])
+def oauth_authorize_get(request: Request) -> HTMLResponse:
     """Inicia o fluxo OAuth (ChatGPT) e exibe o formulário de login P+."""
-    # ChatGPT (oauth_redirect) às vezes sonda este URL sem query string.
-    # 422 aqui derruba o botão "Sign in" antes do redirect.
+    # Query params lidos na mão: validação FastAPI/Pydantic aqui virava 500
+    # e o ChatGPT (POST /gizmos/oauth_redirect) responde 412 Precondition Failed.
+    q = request.query_params
+    redirect_uri = (q.get("redirect_uri") or "").strip()
+    state = (q.get("state") or "").strip()
+    response_type = (q.get("response_type") or "code").strip() or "code"
+    client_id = (q.get("client_id") or "").strip()
+    scope = q.get("scope")
+    code_challenge = q.get("code_challenge")
+    code_challenge_method = q.get("code_challenge_method")
+
     if not redirect_uri or not state:
         return HTMLResponse(
             _login_html(
@@ -451,7 +467,16 @@ def oauth_authorize_get(
     if response_type != "code":
         raise HTTPException(status_code=400, detail="response_type deve ser code.")
 
-    effective_client_id = _validate_client_id(client_id)
+    # ChatGPT às vezes manda um client_id interno; o POST do formulário usa o do servidor.
+    configured = _oauth_client_id()
+    effective_client_id = _effective_client_id(client_id)
+    if not _secure_str_eq(effective_client_id, configured):
+        logger.warning(
+            "OAuth authorize client_id=%s diferente do configurado; usando %s",
+            effective_client_id,
+            configured,
+        )
+        effective_client_id = configured
     _validate_redirect_uri(redirect_uri)
     form_action = str(request.base_url).rstrip("/") + "/oauth/authorize"
 
@@ -480,6 +505,7 @@ def oauth_authorize_post(
     password: str | None = Form(default=None),
     school_id: str | None = Form(default=None),
     dependent_id: str | None = Form(default=None),
+    login_choice: str | None = Form(default=None),
     code_challenge: str | None = Form(default=None),
     code_challenge_method: str | None = Form(default=None),
 ) -> Response:
@@ -590,6 +616,8 @@ def oauth_authorize_post(
         client_id=effective_client_id,
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
+        school_id=selected_school_id,
+        dependent_id=selected_dependent_id,
     )
 
     logger.info(
@@ -699,10 +727,7 @@ async def oauth_token(request: Request) -> JSONResponse:
     raise HTTPException(status_code=400, detail="grant_type não suportado.")
 
 
-@router.get("/.well-known/oauth-authorization-server")
-def oauth_metadata(request: Request) -> dict[str, Any]:
-    """Metadados OAuth (útil para integrações que descobrem endpoints automaticamente)."""
-    base = str(request.base_url).rstrip("/")
+def _chatgpt_oauth_metadata(base: str) -> dict[str, Any]:
     return {
         "issuer": base,
         "authorization_endpoint": f"{base}/oauth/authorize",
@@ -714,4 +739,29 @@ def oauth_metadata(request: Request) -> dict[str, Any]:
         "code_challenge_methods_supported": ["S256"],
         "scopes_supported": ["openid", "profile", "email"],
         "service_documentation": f"{base}/docs",
+    }
+
+
+@router.api_route("/.well-known/oauth-authorization-server", methods=["GET", "HEAD"])
+def oauth_metadata(request: Request) -> dict[str, Any]:
+    """RFC 8414 — metadados do authorization server (ChatGPT oauth_redirect)."""
+    return _chatgpt_oauth_metadata(str(request.base_url).rstrip("/"))
+
+
+@router.api_route("/.well-known/openid-configuration", methods=["GET", "HEAD"])
+def openid_configuration(request: Request) -> dict[str, Any]:
+    """Alias OIDC na raiz — alguns clientes ChatGPT descobrem OAuth por aqui."""
+    return _chatgpt_oauth_metadata(str(request.base_url).rstrip("/"))
+
+
+@router.api_route("/.well-known/oauth-protected-resource", methods=["GET", "HEAD"])
+def oauth_protected_resource(request: Request) -> dict[str, Any]:
+    """RFC 9728 na raiz do domínio (ChatGPT envia só `domain` no oauth_redirect)."""
+    base = str(request.base_url).rstrip("/")
+    return {
+        "resource": base,
+        "authorization_servers": [base],
+        "scopes_supported": ["openid", "profile", "email"],
+        "bearer_methods_supported": ["header"],
+        "resource_documentation": f"{base}/docs",
     }
