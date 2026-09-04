@@ -484,7 +484,7 @@ def _enrollment_from_dep_escolas(
     *,
     school_id: int | None = None,
 ) -> tuple[int | None, int | None]:
-    """enrollmentId do boletim é turma.idOrigem, não o campo matricula (ex.: 010547114)."""
+    """idOrigem da turma no /me; o enrollmentId do boletim vem de gradeStudentReport/years."""
     vinculos = escolas if isinstance(escolas, list) else [escolas] if isinstance(escolas, dict) else []
     ranked: list[tuple[int, int | None, int | None]] = []
     for vinculo in vinculos:
@@ -907,20 +907,27 @@ def discover_profile_config(
     if not email_p4ed:
         raise ProfileDiscoveryError("Não foi possível determinar o email P4ED do aluno.")
 
-    if enrollment_id is None or school_year is None:
-        try:
-            years_payload = _grade_years(
-                base_url,
-                access_token,
-                email_p4ed=str(email_p4ed),
-                origin_id=origin_id,
-                school_id=school_id,
-            )
-            years_year, years_enrollment = _resolve_school_year(years_payload)
-            school_year = school_year or years_year
-            enrollment_id = enrollment_id or years_enrollment
-        except ProfileDiscoveryError as exc:
-            logger.warning("gradeStudentReport/years indisponível: %s", exc)
+    turma_enrollment_id = enrollment_id
+    try:
+        years_payload = _grade_years(
+            base_url,
+            access_token,
+            email_p4ed=str(email_p4ed),
+            origin_id=origin_id,
+            school_id=school_id,
+        )
+        years_year, years_enrollment = _resolve_school_year(years_payload)
+        school_year = years_year or school_year
+        if years_enrollment is not None:
+            enrollment_id = years_enrollment
+        logger.info(
+            "Boletim years=%s enrollmentId=%s (turma.idOrigem=%s)",
+            school_year,
+            enrollment_id,
+            turma_enrollment_id,
+        )
+    except ProfileDiscoveryError as exc:
+        logger.warning("gradeStudentReport/years indisponível: %s", exc)
 
     if school_year is None and enrollment_id is not None:
         school_year = datetime.now().year
@@ -928,7 +935,7 @@ def discover_profile_config(
 
     if enrollment_id is None or school_year is None:
         raise ProfileDiscoveryError(
-            "Não foi possível obter ano letivo e matrícula (turma.idOrigem) do aluno."
+            "Não foi possível obter ano letivo e matrícula do boletim."
         )
 
     return {
