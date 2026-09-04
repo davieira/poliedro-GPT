@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
 import os
 import secrets
@@ -27,6 +28,12 @@ DEFAULT_REDIRECT_PREFIXES = (
     "https://chatgpt.com/aip/",
     "https://chat.openai.com/aip/",
 )
+DEFAULT_REDIRECT_HOSTS = (
+    "chatgpt.com",
+    "www.chatgpt.com",
+    "chat.openai.com",
+    "platform.openai.com",
+)
 GITHUB_REPO_URL = "https://github.com/davieira/poliedro-GPT"
 
 
@@ -37,8 +44,8 @@ class _TokenBundle:
     expires_in: int
     redirect_uri: str
     client_id: str
-    school_id: int | None = None
-    dependent_id: int | None = None
+    code_challenge: str | None = None
+    code_challenge_method: str | None = None
 
 
 _auth_codes: dict[str, tuple[float, _TokenBundle]] = {}
@@ -82,15 +89,35 @@ def _purge_expired() -> None:
 
 
 def _validate_redirect_uri(redirect_uri: str) -> None:
+    parsed = urlparse(redirect_uri)
+    host = (parsed.hostname or "").lower()
     prefixes = _allowed_redirect_prefixes()
-    if not any(redirect_uri.startswith(prefix) for prefix in prefixes):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "redirect_uri não permitido. "
-                f"Use um callback do ChatGPT ({', '.join(prefixes)})."
-            ),
-        )
+    if any(redirect_uri.startswith(prefix) for prefix in prefixes):
+        return
+    if parsed.scheme == "https" and (
+        host in DEFAULT_REDIRECT_HOSTS
+        or host.endswith(".chatgpt.com")
+        or host.endswith(".openai.com")
+    ):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            "redirect_uri não permitido. "
+            f"Use um callback do ChatGPT ({', '.join(prefixes)})."
+        ),
+    )
+
+
+def _verify_pkce(code_verifier: str, challenge: str, method: str) -> bool:
+    method = (method or "S256").strip()
+    if method == "plain":
+        return secrets.compare_digest(code_verifier, challenge)
+    if method.upper() != "S256":
+        return False
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return secrets.compare_digest(computed, challenge)
 
 
 def _validate_client_id(client_id: str | None) -> str:
@@ -180,10 +207,8 @@ def _login_html(
     pending: str | None = None,
     error: str | None = None,
     choice_error: dict[str, Any] | None = None,
-    username: str = "",
-    login_choice: str | None = None,
-    locked_school_id: int | None = None,
-    locked_dependent_id: int | None = None,
+    code_challenge: str | None = None,
+    code_challenge_method: str | None = None,
 ) -> str:
     oauth_hidden = ""
     if pending:
@@ -204,16 +229,15 @@ def _login_html(
         )
     if scope:
         oauth_hidden += f'<input type="hidden" name="scope" value="{html.escape(scope)}">'
-    if locked_school_id is not None:
+    if code_challenge:
         oauth_hidden += (
-            f'<input type="hidden" name="school_id" value="{html.escape(str(locked_school_id))}">'
+            f'<input type="hidden" name="code_challenge" value="{html.escape(code_challenge)}">'
         )
-    if locked_dependent_id is not None:
+    if code_challenge_method:
         oauth_hidden += (
-            f'<input type="hidden" name="dependent_id" '
-            f'value="{html.escape(str(locked_dependent_id))}">'
+            '<input type="hidden" name="code_challenge_method" '
+            f'value="{html.escape(code_challenge_method)}">'
         )
-
     error_block = ""
     if error:
         error_block = f'<p class="error">{html.escape(error)}</p>'
@@ -314,8 +338,8 @@ def _issue_tokens(
     expires_in: int,
     redirect_uri: str,
     client_id: str,
-    school_id: int | None = None,
-    dependent_id: int | None = None,
+    code_challenge: str | None = None,
+    code_challenge_method: str | None = None,
 ) -> str:
     _purge_expired()
     code = secrets.token_urlsafe(32)
@@ -325,8 +349,8 @@ def _issue_tokens(
         expires_in=expires_in,
         redirect_uri=redirect_uri,
         client_id=client_id,
-        school_id=school_id,
-        dependent_id=dependent_id,
+        code_challenge=code_challenge or None,
+        code_challenge_method=code_challenge_method or None,
     )
     _auth_codes[code] = (time.time(), bundle)
     return code
@@ -404,20 +428,32 @@ def _session_access_token(bundle: _TokenBundle) -> str:
 
 @router.get("/oauth/authorize")
 def oauth_authorize_get(
-    redirect_uri: str = Query(...),
-    state: str = Query(...),
+    request: Request,
+    redirect_uri: str | None = Query(default=None),
+    state: str | None = Query(default=None),
     response_type: str = Query(default="code"),
     client_id: str = Query(default=""),
     scope: str | None = Query(default=None),
+    code_challenge: str | None = Query(default=None),
+    code_challenge_method: str | None = Query(default=None),
 ) -> HTMLResponse:
     """Inicia o fluxo OAuth (ChatGPT) e exibe o formulário de login P+."""
+    # ChatGPT (oauth_redirect) às vezes sonda este URL sem query string.
+    # 422 aqui derruba o botão "Sign in" antes do redirect.
+    if not redirect_uri or not state:
+        return HTMLResponse(
+            _login_html(
+                error="Abra esta tela pelo botão Entrar / Sign in no ChatGPT.",
+                form_action="/oauth/authorize",
+            )
+        )
+
     if response_type != "code":
         raise HTTPException(status_code=400, detail="response_type deve ser code.")
-    if not state:
-        raise HTTPException(status_code=400, detail="state é obrigatório.")
 
     effective_client_id = _validate_client_id(client_id)
     _validate_redirect_uri(redirect_uri)
+    form_action = str(request.base_url).rstrip("/") + "/oauth/authorize"
 
     return HTMLResponse(
         _login_html(
@@ -426,6 +462,9 @@ def oauth_authorize_get(
             state=state,
             response_type=response_type,
             scope=scope,
+            form_action=form_action,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
         )
     )
 
@@ -441,7 +480,8 @@ def oauth_authorize_post(
     password: str | None = Form(default=None),
     school_id: str | None = Form(default=None),
     dependent_id: str | None = Form(default=None),
-    login_choice: str | None = Form(default=None),
+    code_challenge: str | None = Form(default=None),
+    code_challenge_method: str | None = Form(default=None),
 ) -> Response:
     """Valida credenciais P+ e redireciona de volta ao ChatGPT com authorization code."""
     effective_client_id = _validate_client_id(client_id)
@@ -474,7 +514,16 @@ def oauth_authorize_post(
         )
     except LoginError as exc:
         return HTMLResponse(
-            _form(error=str(exc), username=username.strip()),
+            _login_html(
+                client_id=effective_client_id,
+                redirect_uri=redirect_uri,
+                state=state,
+                response_type=response_type,
+                scope=scope,
+                error=str(exc),
+                code_challenge=code_challenge,
+                code_challenge_method=code_challenge_method,
+            ),
             status_code=401,
         )
 
@@ -512,8 +561,8 @@ def oauth_authorize_post(
                 username=resolved_username,
                 login_choice=retry_token,
                 choice_error={"tipo": exc.choice_type, "opcoes": exc.options},
-                locked_school_id=parsed_school_id if exc.choice_type != "escola" else None,
-                locked_dependent_id=parsed_dependent_id if exc.choice_type != "dependente" else None,
+                code_challenge=code_challenge,
+                code_challenge_method=code_challenge_method,
             ),
             status_code=409,
         )
@@ -522,6 +571,8 @@ def oauth_authorize_post(
             _form(
                 username=resolved_username,
                 error=f"Não foi possível carregar o perfil: {exc}",
+                code_challenge=code_challenge,
+                code_challenge_method=code_challenge_method,
             ),
             status_code=400,
         )
@@ -537,8 +588,8 @@ def oauth_authorize_post(
         expires_in=expires_in,
         redirect_uri=redirect_uri,
         client_id=effective_client_id,
-        school_id=selected_school_id,
-        dependent_id=selected_dependent_id,
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
     )
 
     logger.info(
@@ -583,6 +634,15 @@ async def oauth_token(request: Request) -> JSONResponse:
 
         if bundle.redirect_uri != redirect_uri:
             raise HTTPException(status_code=400, detail="redirect_uri não confere.")
+
+        if bundle.code_challenge:
+            code_verifier = str(body.get("code_verifier", "")).strip()
+            if not code_verifier or not _verify_pkce(
+                code_verifier,
+                bundle.code_challenge,
+                bundle.code_challenge_method or "S256",
+            ):
+                raise HTTPException(status_code=400, detail="code_verifier inválido.")
 
         refresh_key = secrets.token_urlsafe(32) if bundle.refresh_token else None
         if refresh_key and bundle.refresh_token:
@@ -648,6 +708,10 @@ def oauth_metadata(request: Request) -> dict[str, Any]:
         "authorization_endpoint": f"{base}/oauth/authorize",
         "token_endpoint": f"{base}/oauth/token",
         "response_types_supported": ["code"],
+        "response_modes_supported": ["query"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "code_challenge_methods_supported": ["S256"],
+        "scopes_supported": ["openid", "profile", "email"],
+        "service_documentation": f"{base}/docs",
     }
