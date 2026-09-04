@@ -293,7 +293,7 @@ async def use_request_public_base_url(request: Request, call_next):
         reset_request_base_url(token)
 
 
-@app.get("/", tags=["meta"])
+@app.api_route("/", methods=["GET", "HEAD"], tags=["meta"])
 def root() -> dict[str, str]:
     """Endpoint público para health check do Render."""
     return {
@@ -312,7 +312,7 @@ def privacy_policy() -> HTMLResponse:
     return HTMLResponse(privacy_policy_html())
 
 
-@app.get("/health", tags=["meta"])
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["meta"])
 def public_health() -> dict[str, str]:
     return {"status": "ok"}
 
