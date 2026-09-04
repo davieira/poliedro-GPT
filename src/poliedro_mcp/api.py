@@ -137,8 +137,9 @@ def _handle_service_error(exc: Exception) -> JSONResponse:
         )
 
     if isinstance(exc, ProfileDiscoveryError):
+        status_code = status.HTTP_401_UNAUTHORIZED if "login novamente" in str(exc).lower() else status.HTTP_400_BAD_REQUEST
         return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status_code,
             content={"error": str(exc)},
         )
 
@@ -364,6 +365,86 @@ def get_grades(
         return _handle_service_error(exc)
 
 
+@app.get(f"{API_PREFIX}/assessments/simulation/list", tags=["poliedro"])
+def list_simulation_assessments(
+    school_year: int | None = Query(default=None, ge=2000, le=2100),
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
+) -> Any:
+    """Lista simulados com assessment_id (UUID) para usar no endpoint de detalhe."""
+    try:
+        return _service_for(ctx).list_simulation_assessments(school_year=school_year)
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@app.get(
+    f"{API_PREFIX}/assessments/simulation/{{assessment_id}}/performance",
+    tags=["poliedro"],
+)
+def get_simulation_performance(
+    assessment_id: str,
+    compare_with: int | None = Query(default=None, ge=0, le=2),
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
+) -> Any:
+    """
+    Detalhe do simulado por matéria.
+
+    Fluxo: chame GET /assessments/simulation/list, copie assessment_id do simulado
+    desejado e use neste path (não use índice nem nome).
+    """
+    try:
+        return _service_for(ctx).get_simulation_performance(
+            assessment_id,
+            compare_with=compare_with,
+        )
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@app.get(
+    f"{API_PREFIX}/assessments/simulation/performance",
+    tags=["poliedro"],
+    include_in_schema=False,
+)
+def get_simulation_performance_legacy(
+    assessment_id: str = Query(
+        ...,
+        description="UUID retornado por GET /assessments/simulation/list.",
+    ),
+    compare_with: int | None = Query(default=None, ge=0, le=2),
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
+) -> Any:
+    """Compatibilidade com clientes que usam query param assessment_id."""
+    try:
+        return _service_for(ctx).get_simulation_performance(
+            assessment_id,
+            compare_with=compare_with,
+        )
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@app.get(f"{API_PREFIX}/assessments/simulation", tags=["poliedro"])
+def get_simulation_grades(
+    school_year: int | None = Query(
+        default=None,
+        description="Ano letivo. Se omitido, usa o configurado no aluno.",
+        ge=2000,
+        le=2100,
+    ),
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
+) -> Any:
+    """Consulta notas do simulado / prova trimestral do Poliedro/P+."""
+    try:
+        return _service_for(ctx).get_simulation_grades(school_year=school_year)
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
 @app.get(f"{API_PREFIX}/messages", tags=["poliedro"])
 def get_messages(
     status_filter: str = Query(
@@ -394,6 +475,23 @@ def get_unread_messages(
     """Consulta mensagens/notificações não lidas do portal Poliedro/P+."""
     try:
         return _service_for(ctx).get_messages(status="UNREAD", limit=limit)
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@app.get(f"{API_PREFIX}/messages/{{announcement_id}}", tags=["poliedro"])
+def get_message_detail(
+    announcement_id: int,
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
+) -> Any:
+    """
+    Conteúdo completo de um comunicado/mensagem.
+
+    Use o announcement_id retornado por GET /messages (campo announcement_id).
+    """
+    try:
+        return _service_for(ctx).get_message_detail(announcement_id)
     except Exception as exc:
         return _handle_service_error(exc)
 

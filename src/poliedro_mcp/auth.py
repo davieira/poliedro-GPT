@@ -35,7 +35,7 @@ def login_with_password(base_url: str, username: str, password: str) -> dict[str
         "client_id": "pmais",
         "username": username,
         "password": password,
-        "scope": "openid profile email",
+        "scope": "openid legacy-info email profile",
     }
 
     response = requests.post(
@@ -66,6 +66,7 @@ def refresh_access_token(base_url: str, refresh_token: str) -> dict[str, Any]:
         "grant_type": "refresh_token",
         "client_id": "pmais",
         "refresh_token": refresh_token,
+        "scope": "openid legacy-info email profile",
     }
 
     response = requests.post(

@@ -49,6 +49,43 @@ def register_tools(mcp: FastMCP) -> None:
         return _service(school_id=school_id, dependent_id=dependent_id).get_grades()
 
     @mcp.tool()
+    def get_simulation_grades(
+        school_year: int | None = None,
+        school_id: int | None = None,
+        dependent_id: int | None = None,
+    ) -> Any:
+        """Consulta notas do simulado / prova trimestral do Poliedro/P+."""
+        return _service(school_id=school_id, dependent_id=dependent_id).get_simulation_grades(
+            school_year=school_year
+        )
+
+    @mcp.tool()
+    def list_simulation_assessments(
+        school_year: int | None = None,
+        school_id: int | None = None,
+        dependent_id: int | None = None,
+    ) -> Any:
+        """Lista simulados com UUID, status, datas e nota geral."""
+        return _service(school_id=school_id, dependent_id=dependent_id).list_simulation_assessments(
+            school_year=school_year
+        )
+
+    @mcp.tool()
+    def get_simulation_performance(
+        assessment_id: str,
+        school_id: int | None = None,
+        dependent_id: int | None = None,
+    ) -> Any:
+        """
+        Consulta detalhe do simulado por matéria.
+
+        Use assessment_id retornado por list_simulation_assessments.
+        """
+        return _service(school_id=school_id, dependent_id=dependent_id).get_simulation_performance(
+            assessment_id
+        )
+
+    @mcp.tool()
     def get_unread_messages(
         limit: int = 50,
         school_id: int | None = None,
@@ -67,9 +104,20 @@ def register_tools(mcp: FastMCP) -> None:
         school_id: int | None = None,
         dependent_id: int | None = None,
     ) -> Any:
-        """Consulta mensagens/notificações do portal Poliedro/P+."""
+        """Lista mensagens/comunicados com preview. Use announcement_id em get_message_detail."""
         return _service(school_id=school_id, dependent_id=dependent_id).get_messages(
             status=status, limit=limit, page=page
+        )
+
+    @mcp.tool()
+    def get_message_detail(
+        announcement_id: int,
+        school_id: int | None = None,
+        dependent_id: int | None = None,
+    ) -> Any:
+        """Consulta conteúdo completo de um comunicado. Use announcement_id de get_messages."""
+        return _service(school_id=school_id, dependent_id=dependent_id).get_message_detail(
+            announcement_id
         )
 
     @mcp.tool()

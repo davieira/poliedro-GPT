@@ -6,6 +6,7 @@ from typing import Any
 
 from .auth import login_with_password, normalize_token
 from .config_loader import load_config, load_config_from_env, merge_discovered_config
+from .mcp_oauth_tokens import parse_session_context
 from .profile_discovery import (
     ProfileChoiceRequired,
     ProfileDiscoveryError,
@@ -117,6 +118,7 @@ def login_and_build_profile(
             "enrollment_id": config["student"]["enrollment_id"],
             "origin_id": config["student"]["origin_id"],
             "role_id": config["student"]["role_id"],
+            "dependent_id": config["student"].get("dependent_id"),
             "calendar_owner_id": config["calendar"]["owner_id"],
         },
     }
@@ -136,6 +138,13 @@ def get_service(
     """
     if access_token:
         token = normalize_token(access_token)
+        session = parse_session_context(token)
+        if session:
+            token = session.access_token
+            if school_id is None:
+                school_id = session.school_id
+            if dependent_id is None:
+                dependent_id = session.dependent_id
         config = build_config_for_token(
             token,
             school_id=school_id,
