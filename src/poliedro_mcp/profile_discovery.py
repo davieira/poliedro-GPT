@@ -37,6 +37,18 @@ class UpstreamUnavailable(ProfileDiscoveryError):
         )
 
 
+class TokenRejected(ProfileDiscoveryError):
+    """O P+ recusou o JWT (401/403). O cliente precisa autenticar de novo."""
+
+    def __init__(self, path: str, status_code: int) -> None:
+        self.path = path
+        self.status_code = status_code
+        super().__init__(
+            "Token expirado ou recusado pelo P+. "
+            "Faça login novamente no ChatGPT (Sign in) ou no Claude."
+        )
+
+
 class ProfileChoiceRequired(ProfileDiscoveryError):
     """Perfil ambíguo: o cliente deve informar school_id ou dependent_id."""
 
@@ -82,6 +94,8 @@ def _is_retryable_status(status_code: int) -> bool:
 def _raise_for_status(path: str, response: requests.Response) -> None:
     if response.status_code < 400:
         return
+    if response.status_code in {401, 403}:
+        raise TokenRejected(path, response.status_code)
     if response.status_code >= 500 or _is_retryable_status(response.status_code):
         raise UpstreamUnavailable(path, response.status_code, response.text)
     raise ProfileDiscoveryError(
@@ -225,9 +239,10 @@ def _try_get_paths(
     for path in paths:
         try:
             return _get(base_url, access_token, path)
-        except UpstreamUnavailable:
+        except (UpstreamUnavailable, TokenRejected):
             raise
-        except ProfileDiscoveryError:
+        except ProfileDiscoveryError as exc:
+            logger.warning("%s", exc)
             continue
     return None
 
@@ -241,12 +256,19 @@ def _try_login_external(base_url: str, access_token: str) -> dict[str, Any] | No
             "/pmais/api/v1/login-external",
             {"accessToken": access_token},
         )
-    except UpstreamUnavailable:
+    except (UpstreamUnavailable, TokenRejected):
         raise
     except ProfileDiscoveryError as exc:
         logger.warning("login-external falhou: %s", exc)
         return None
-    if not isinstance(data, dict) or not _looks_like_uuid(data.get("userId")):
+    if not isinstance(data, dict):
+        return None
+    escolas = data.get("escolas") or data.get("perfis_escola") or []
+    if not _looks_like_uuid(data.get("userId")) and not escolas:
+        logger.warning(
+            "login-external sem userId UUID e sem escolas (chaves=%s)",
+            list(data.keys()),
+        )
         return None
     logger.info(
         "login-external ok userId P+ escolas=%s",
@@ -588,6 +610,31 @@ def _dependents_from_me(me: dict[str, Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _dependents_from_api(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        dependent_id = _as_optional_int(item.get("id") or item.get("idUsuario"))
+        if dependent_id is None:
+            continue
+        enrollment_id, school_year = _enrollment_from_dep_escolas(
+            item.get("escola") or item.get("escolas")
+        )
+        normalized.append(
+            {
+                "id": dependent_id,
+                "userId": item.get("userId"),
+                "name": item.get("name") or item.get("nome"),
+                "emailP4ed": item.get("emailP4ed") or item.get("emailp4ed") or item.get("email"),
+                "originId": item.get("originId") or item.get("originID") or item.get("idOrigem"),
+                "enrollmentId": enrollment_id or _as_optional_int(item.get("enrollmentId")),
+                "schoolYear": school_year or _as_optional_int(item.get("schoolYear")),
+            }
+        )
+    return normalized
+
+
 def _is_active_school(item: dict[str, Any]) -> bool:
     if item.get("excluido") is True:
         return False
@@ -675,7 +722,11 @@ def _list_school_links(base_url: str, access_token: str, user_id: int) -> list[d
         "/pmais/api/v1/escolausuario/all",
         params={"idUsuario": user_id, "page": 1, "limit": 50},
     )
-    links = data.get("escolausuarios") or []
+    links = [
+        item
+        for item in (data.get("escolausuarios") or [])
+        if isinstance(item, dict) and _as_optional_int(item.get("idUsuario")) == int(user_id)
+    ]
     if not links:
         raise ProfileDiscoveryError(
             "Nenhuma escola vinculada à conta. Verifique o acesso no portal P+."
@@ -856,10 +907,18 @@ def discover_profile_config(
         raise ProfileDiscoveryError("Token sem idUsuario.")
 
     exp = _as_optional_int(claims.get("exp"))
-    if exp is not None and exp < int(time.time()) - 30:
+    if exp is not None and exp <= int(time.time()):
         raise ProfileDiscoveryError(
             "Token expirado. Faça login novamente no ChatGPT (Sign in)."
         )
+
+    logger.info(
+        "Descoberta de perfil user=%s exp_in=%ss school_id=%s dependent_id=%s",
+        username,
+        (exp - int(time.time())) if exp is not None else None,
+        school_id,
+        dependent_id,
+    )
 
     last_upstream: UpstreamUnavailable | None = None
     session: dict[str, Any] | None = None
@@ -877,6 +936,10 @@ def discover_profile_config(
         if session and _looks_like_uuid(session.get("userId"))
         else None
     )
+    if session:
+        exchanged = session.get("accessToken") or session.get("access_token")
+        if isinstance(exchanged, str) and exchanged.strip():
+            access_token = exchanged.strip()
     if pmais_uuid is None and user_id is not None:
         try:
             pmais_uuid = _lookup_pmais_user_uuid(base_url, access_token, int(user_id))
@@ -915,6 +978,21 @@ def discover_profile_config(
             logger.warning("%s", exc)
         except ProfileDiscoveryError as exc:
             logger.warning("escolausuario/all indisponível: %s", exc)
+    if not school_links and school_id is not None:
+        role = ROLE_RESPONSAVEL if dependent_id is not None else ROLE_ALUNO
+        logger.info(
+            "Usando escola da sessão OAuth school_id=%s role=%s",
+            school_id,
+            role,
+        )
+        school_links = [
+            {
+                "idEscola": int(school_id),
+                "idPerfil": role,
+                "nome": None,
+                "usuario": {},
+            }
+        ]
     if not school_links:
         if last_upstream:
             raise last_upstream
@@ -948,6 +1026,21 @@ def discover_profile_config(
 
     if profile_role_id == ROLE_RESPONSAVEL:
         dependents = _dependents_from_me(me) if me else []
+        if not dependents:
+            try:
+                dependents = _dependents_from_api(
+                    _list_dependents(
+                        base_url,
+                        access_token,
+                        int(user_id),
+                        school_id,
+                    )
+                )
+            except TokenRejected:
+                raise
+            except ProfileDiscoveryError as exc:
+                logger.warning("user/dependents indisponível: %s", exc)
+                dependents = []
         if not dependents:
             raise ProfileDiscoveryError(
                 "Conta de responsável sem dependentes no /me do P+."
