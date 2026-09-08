@@ -17,7 +17,11 @@ from .logger import logger
 from .api_base import api_base_url, bind_request_base_url_from_request, configured_api_base_url, reset_request_base_url
 from .mcp_remote import get_mcp_session_manager, get_mcp_starlette_app, router as mcp_router
 from .oauth_proxy import router as oauth_router
-from .profile_discovery import ProfileChoiceRequired, ProfileDiscoveryError
+from .profile_discovery import (
+    ProfileChoiceRequired,
+    ProfileDiscoveryError,
+    UpstreamUnavailable,
+)
 from .privacy_policy import privacy_policy_html
 from .user_context import get_service, login_and_build_profile
 
@@ -134,6 +138,12 @@ def _handle_service_error(exc: Exception) -> JSONResponse:
                 "opcoes": exc.options,
                 "detail": str(exc),
             },
+        )
+
+    if isinstance(exc, UpstreamUnavailable):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"error": str(exc)},
         )
 
     if isinstance(exc, ProfileDiscoveryError):
@@ -315,6 +325,26 @@ def privacy_policy() -> HTMLResponse:
 @app.api_route("/health", methods=["GET", "HEAD"], tags=["meta"])
 def public_health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post(
+    "/sso/auth/realms/poliedro/protocol/openid-connect/token",
+    include_in_schema=False,
+)
+def keycloak_token_not_on_this_host() -> JSONResponse:
+    """Clientes às vezes apontam o token URL do P+ para esta API (iden.is)."""
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={
+            "error": "not_found",
+            "detail": (
+                "Este host não é o Keycloak do Poliedro. "
+                "Login com usuário/senha: POST https://poliedro-api.p4ed.com"
+                "/sso/auth/realms/poliedro/protocol/openid-connect/token. "
+                "ChatGPT/Claude: use /oauth/authorize e /oauth/token neste host."
+            ),
+        },
+    )
 
 
 @app.post(f"{API_PREFIX}/auth/login", tags=["auth"], include_in_schema=False)

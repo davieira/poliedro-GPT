@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 from datetime import datetime
 from typing import Any
 
@@ -21,6 +22,19 @@ _UUID_RE = re.compile(
 
 class ProfileDiscoveryError(RuntimeError):
     pass
+
+
+class UpstreamUnavailable(ProfileDiscoveryError):
+    """A API do P+ respondeu 5xx (ex.: Cloudflare 502)."""
+
+    def __init__(self, path: str, status_code: int, body: str = "") -> None:
+        self.path = path
+        self.status_code = status_code
+        self.body = body
+        super().__init__(
+            f"A API do Poliedro (P+) está instável (HTTP {status_code} em {path}). "
+            "Tente de novo em instantes."
+        )
 
 
 class ProfileChoiceRequired(ProfileDiscoveryError):
@@ -61,6 +75,72 @@ def _api_headers(access_token: str) -> dict[str, str]:
     }
 
 
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code in {502, 503, 504}
+
+
+def _raise_for_status(path: str, response: requests.Response) -> None:
+    if response.status_code < 400:
+        return
+    if response.status_code >= 500 or _is_retryable_status(response.status_code):
+        raise UpstreamUnavailable(path, response.status_code, response.text)
+    raise ProfileDiscoveryError(
+        f"Falha ao consultar {path}: HTTP {response.status_code} — {response.text}"
+    )
+
+
+def _request_json(
+    method: str,
+    base_url: str,
+    access_token: str,
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+    json_body: dict[str, Any] | None = None,
+    retries: int = 1,
+) -> Any:
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = _api_headers(access_token)
+    if json_body is not None:
+        headers = {**headers, "Content-Type": "application/json"}
+
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        response = requests.request(
+            method,
+            url,
+            headers=headers,
+            params=params,
+            json=json_body,
+            timeout=20,
+        )
+        try:
+            _raise_for_status(path, response)
+        except UpstreamUnavailable as exc:
+            last_exc = exc
+            if attempt < retries:
+                logger.warning(
+                    "P+ %s %s HTTP %s — retry %s/%s",
+                    method,
+                    path,
+                    exc.status_code,
+                    attempt + 1,
+                    retries,
+                )
+                time.sleep(1.5)
+                continue
+            raise
+        if not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            return None
+    if last_exc:
+        raise last_exc
+    return None
+
+
 def _get(
     base_url: str,
     access_token: str,
@@ -68,18 +148,7 @@ def _get(
     *,
     params: dict[str, Any] | None = None,
 ) -> Any:
-    url = f"{base_url.rstrip('/')}{path}"
-    response = requests.get(
-        url,
-        headers=_api_headers(access_token),
-        params=params,
-        timeout=20,
-    )
-    if response.status_code >= 400:
-        raise ProfileDiscoveryError(
-            f"Falha ao consultar {path}: HTTP {response.status_code} — {response.text}"
-        )
-    return response.json()
+    return _request_json("GET", base_url, access_token, path, params=params)
 
 
 def _post_json(
@@ -88,23 +157,7 @@ def _post_json(
     path: str,
     payload: dict[str, Any],
 ) -> Any:
-    url = f"{base_url.rstrip('/')}{path}"
-    response = requests.post(
-        url,
-        headers={**_api_headers(access_token), "Content-Type": "application/json"},
-        json=payload,
-        timeout=20,
-    )
-    if response.status_code >= 400:
-        raise ProfileDiscoveryError(
-            f"Falha ao consultar {path}: HTTP {response.status_code} — {response.text}"
-        )
-    if not response.content:
-        return None
-    try:
-        return response.json()
-    except ValueError:
-        return None
+    return _request_json("POST", base_url, access_token, path, json_body=payload)
 
 
 def _looks_like_uuid(value: Any) -> bool:
@@ -172,6 +225,8 @@ def _try_get_paths(
     for path in paths:
         try:
             return _get(base_url, access_token, path)
+        except UpstreamUnavailable:
+            raise
         except ProfileDiscoveryError:
             continue
     return None
@@ -186,6 +241,8 @@ def _try_login_external(base_url: str, access_token: str) -> dict[str, Any] | No
             "/pmais/api/v1/login-external",
             {"accessToken": access_token},
         )
+    except UpstreamUnavailable:
+        raise
     except ProfileDiscoveryError as exc:
         logger.warning("login-external falhou: %s", exc)
         return None
@@ -798,19 +855,48 @@ def discover_profile_config(
     if not user_id:
         raise ProfileDiscoveryError("Token sem idUsuario.")
 
-    session = _try_login_external(base_url, access_token)
+    exp = _as_optional_int(claims.get("exp"))
+    if exp is not None and exp < int(time.time()) - 30:
+        raise ProfileDiscoveryError(
+            "Token expirado. Faça login novamente no ChatGPT (Sign in)."
+        )
+
+    last_upstream: UpstreamUnavailable | None = None
+    session: dict[str, Any] | None = None
+    me: dict[str, Any] | None = None
+    perfil: dict[str, Any] | None = None
+
+    try:
+        session = _try_login_external(base_url, access_token)
+    except UpstreamUnavailable as exc:
+        last_upstream = exc
+        logger.warning("%s", exc)
+
     pmais_uuid = (
         str(session["userId"]).strip()
         if session and _looks_like_uuid(session.get("userId"))
         else None
     )
     if pmais_uuid is None and user_id is not None:
-        pmais_uuid = _lookup_pmais_user_uuid(base_url, access_token, int(user_id))
+        try:
+            pmais_uuid = _lookup_pmais_user_uuid(base_url, access_token, int(user_id))
+        except UpstreamUnavailable as exc:
+            last_upstream = exc
+            logger.warning("%s", exc)
 
-    me = _try_fetch_me(base_url, access_token, claims, pmais_uuid=pmais_uuid)
-    perfil = _try_fetch_perfil(
-        base_url, access_token, claims, me, pmais_uuid=pmais_uuid
-    )
+    try:
+        me = _try_fetch_me(base_url, access_token, claims, pmais_uuid=pmais_uuid)
+    except UpstreamUnavailable as exc:
+        last_upstream = exc
+        logger.warning("%s", exc)
+
+    try:
+        perfil = _try_fetch_perfil(
+            base_url, access_token, claims, me, pmais_uuid=pmais_uuid
+        )
+    except UpstreamUnavailable as exc:
+        last_upstream = exc
+        logger.warning("%s", exc)
 
     school_links = _school_links_from_perfil(perfil) if perfil else []
     if not school_links and me:
@@ -818,6 +904,20 @@ def discover_profile_config(
     if not school_links and session:
         school_links = _school_links_from_login_external(session)
     if not school_links:
+        try:
+            school_links = _list_school_links(base_url, access_token, int(user_id))
+            logger.info(
+                "Escolas via /escolausuario/all: %s",
+                len(school_links),
+            )
+        except UpstreamUnavailable as exc:
+            last_upstream = exc
+            logger.warning("%s", exc)
+        except ProfileDiscoveryError as exc:
+            logger.warning("escolausuario/all indisponível: %s", exc)
+    if not school_links:
+        if last_upstream:
+            raise last_upstream
         raise ProfileDiscoveryError(
             "Não foi possível ler a escola no perfil P+ "
             "(/login-external, /perfil/get/user e /usuario/{id}/me)."
@@ -926,6 +1026,8 @@ def discover_profile_config(
             enrollment_id,
             turma_enrollment_id,
         )
+    except UpstreamUnavailable:
+        raise
     except ProfileDiscoveryError as exc:
         logger.warning("gradeStudentReport/years indisponível: %s", exc)
 
