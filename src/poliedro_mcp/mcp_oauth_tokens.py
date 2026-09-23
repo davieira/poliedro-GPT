@@ -15,7 +15,6 @@ PENDING_TTL = 600
 AUTH_CODE_TTL = 120
 SESSION_TTL = 3600
 LOGIN_CHOICE_TTL = 600
-MAX_AUTH_CODE_URL_LEN = 2000
 
 
 @dataclass(frozen=True)
@@ -87,13 +86,6 @@ def mint_pending_token(client_data: dict[str, Any], params_data: dict[str, Any])
             "jti": secrets.token_urlsafe(16),
         },
         ttl=PENDING_TTL,
-    )
-
-
-def mint_auth_code_token(code_data: dict[str, Any]) -> str:
-    return sign_payload(
-        {"typ": "mcp_code", "jti": secrets.token_urlsafe(16), **code_data},
-        ttl=AUTH_CODE_TTL,
     )
 
 

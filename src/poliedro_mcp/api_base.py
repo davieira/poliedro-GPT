@@ -49,8 +49,3 @@ def api_base_url() -> str:
         return from_request
 
     return DEFAULT_API_BASE_URL
-
-
-def mcp_base_url(*, stable: bool = False) -> str:
-    base = configured_api_base_url() if stable else api_base_url()
-    return f"{base}/mcp"

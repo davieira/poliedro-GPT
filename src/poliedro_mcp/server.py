@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from .mcp_remote import create_stdio_server
+from .mcp_tools import create_local_server
 
-mcp = create_stdio_server()
+mcp = create_local_server()
 
 
 if __name__ == "__main__":

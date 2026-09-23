@@ -6,6 +6,7 @@ import html
 import os
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode, urlparse
@@ -16,7 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from .auth import LoginError, login_with_password, refresh_access_token
 from .logger import logger
 from .mcp_oauth_tokens import mint_login_choice_token, mint_session_access_token, parse_login_choice_token
-from .profile_discovery import ProfileChoiceRequired
+from .profile_discovery import ProfileChoiceRequired, discover_profile_config
 from .user_context import get_base_config
 
 router = APIRouter(tags=["oauth"])
@@ -429,6 +430,94 @@ def resolve_form_tokens(
     return tokens, username.strip(), None, None
 
 
+@dataclass(frozen=True)
+class PortalSession:
+    username: str
+    access_token: str
+    refresh_token: str | None
+    expires_in: int
+    school_id: int
+    dependent_id: int | None
+
+
+def authenticate_and_select_profile(
+    *,
+    username: str,
+    password: str | None,
+    login_choice: str | None,
+    school_id: str | None,
+    dependent_id: str | None,
+    page: Callable[..., str],
+    expires_fallback: int,
+) -> PortalSession | HTMLResponse:
+    """Login P+ compartilhado pelo ChatGPT (/oauth/authorize) e pelo Claude (/mcp/login)."""
+    base_url = get_base_config()["base_url"].rstrip("/")
+    parsed_school_id = _parse_optional_int(school_id)
+    parsed_dependent_id = _parse_optional_int(dependent_id)
+
+    try:
+        tokens, resolved_username, choice_school_id, choice_dependent_id = resolve_form_tokens(
+            base_url=base_url,
+            username=username,
+            password=password,
+            login_choice=login_choice,
+        )
+    except LoginError as exc:
+        return HTMLResponse(page(error=str(exc), username=username.strip()), status_code=401)
+
+    if parsed_school_id is None:
+        parsed_school_id = choice_school_id
+    if parsed_dependent_id is None:
+        parsed_dependent_id = choice_dependent_id
+
+    try:
+        discovered = discover_profile_config(
+            base_url,
+            tokens["access_token"],
+            interactive=False,
+            school_id=parsed_school_id,
+            dependent_id=parsed_dependent_id,
+        )
+    except ProfileChoiceRequired as exc:
+        try:
+            retry_token = mint_choice_token(
+                tokens,
+                resolved_username,
+                school_id=parsed_school_id,
+                dependent_id=parsed_dependent_id,
+            )
+        except RuntimeError:
+            retry_token = None
+        return HTMLResponse(
+            page(
+                username=resolved_username,
+                login_choice=retry_token,
+                choice_error={"tipo": exc.choice_type, "opcoes": exc.options},
+                locked_school_id=parsed_school_id if exc.choice_type != "escola" else None,
+                locked_dependent_id=parsed_dependent_id if exc.choice_type != "dependente" else None,
+            ),
+            status_code=409,
+        )
+    except Exception as exc:
+        return HTMLResponse(
+            page(username=resolved_username, error=f"Não foi possível carregar o perfil: {exc}"),
+            status_code=400,
+        )
+
+    selected_dependent_id = discovered["student"].get("dependent_id")
+    if selected_dependent_id is not None:
+        selected_dependent_id = int(selected_dependent_id)
+
+    return PortalSession(
+        username=resolved_username,
+        access_token=str(tokens["access_token"]),
+        refresh_token=tokens.get("refresh_token"),
+        expires_in=int(tokens.get("expires_in") or expires_fallback),
+        school_id=int(discovered["student"]["school_id"]),
+        dependent_id=selected_dependent_id,
+    )
+
+
 def mint_choice_token(
     tokens: dict[str, Any],
     username: str,
@@ -529,115 +618,46 @@ def oauth_authorize_post(
     if response_type != "code":
         raise HTTPException(status_code=400, detail="response_type deve ser code.")
 
-    base = get_base_config()
-    base_url = base["base_url"].rstrip("/")
-    parsed_school_id = _parse_optional_int(school_id)
-    parsed_dependent_id = _parse_optional_int(dependent_id)
-
-    def _form(**kwargs: Any) -> str:
+    def page(**kwargs: Any) -> str:
         return _login_html(
             client_id=effective_client_id,
             redirect_uri=redirect_uri,
             state=state,
             response_type=response_type,
             scope=scope,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
             **kwargs,
         )
 
-    try:
-        tokens, resolved_username, choice_school_id, choice_dependent_id = resolve_form_tokens(
-            base_url=base_url,
-            username=username,
-            password=password,
-            login_choice=login_choice,
-        )
-    except LoginError as exc:
-        return HTMLResponse(
-            _login_html(
-                client_id=effective_client_id,
-                redirect_uri=redirect_uri,
-                state=state,
-                response_type=response_type,
-                scope=scope,
-                error=str(exc),
-                code_challenge=code_challenge,
-                code_challenge_method=code_challenge_method,
-            ),
-            status_code=401,
-        )
-
-    if parsed_school_id is None:
-        parsed_school_id = choice_school_id
-    if parsed_dependent_id is None:
-        parsed_dependent_id = choice_dependent_id
-
-    access_token = tokens["access_token"]
-    refresh_token = tokens.get("refresh_token")
-    expires_in = int(tokens.get("expires_in") or 300)
-
-    try:
-        from .profile_discovery import discover_profile_config
-
-        discovered = discover_profile_config(
-            base_url,
-            access_token,
-            interactive=False,
-            school_id=parsed_school_id,
-            dependent_id=parsed_dependent_id,
-        )
-    except ProfileChoiceRequired as exc:
-        try:
-            retry_token = mint_choice_token(
-                tokens,
-                resolved_username,
-                school_id=parsed_school_id,
-                dependent_id=parsed_dependent_id,
-            )
-        except RuntimeError:
-            retry_token = None
-        return HTMLResponse(
-            _form(
-                username=resolved_username,
-                login_choice=retry_token,
-                choice_error={"tipo": exc.choice_type, "opcoes": exc.options},
-                code_challenge=code_challenge,
-                code_challenge_method=code_challenge_method,
-            ),
-            status_code=409,
-        )
-    except Exception as exc:
-        return HTMLResponse(
-            _form(
-                username=resolved_username,
-                error=f"Não foi possível carregar o perfil: {exc}",
-                code_challenge=code_challenge,
-                code_challenge_method=code_challenge_method,
-            ),
-            status_code=400,
-        )
-
-    selected_school_id = int(discovered["student"]["school_id"])
-    selected_dependent_id = discovered["student"].get("dependent_id")
-    if selected_dependent_id is not None:
-        selected_dependent_id = int(selected_dependent_id)
+    result = authenticate_and_select_profile(
+        username=username,
+        password=password,
+        login_choice=login_choice,
+        school_id=school_id,
+        dependent_id=dependent_id,
+        page=page,
+        expires_fallback=300,
+    )
+    if isinstance(result, HTMLResponse):
+        return result
 
     code = _issue_tokens(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=expires_in,
+        access_token=result.access_token,
+        refresh_token=result.refresh_token,
+        expires_in=result.expires_in,
         redirect_uri=redirect_uri,
         client_id=effective_client_id,
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
-        school_id=selected_school_id,
-        dependent_id=selected_dependent_id,
+        school_id=result.school_id,
+        dependent_id=result.dependent_id,
     )
-
     logger.info(
         "OAuth login concluído para usuário=%s school_id=%s dependent_id=%s",
-        resolved_username,
-        selected_school_id,
-        selected_dependent_id,
+        result.username,
+        result.school_id,
+        result.dependent_id,
     )
     return _redirect_with_code(redirect_uri, code, state)
 

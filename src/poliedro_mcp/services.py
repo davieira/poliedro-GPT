@@ -369,11 +369,11 @@ class PoliedroService:
             "roleId": self.cfg["student"]["role_id"],
             "dependentId": self.cfg["calendar"]["owner_id"],
         }
-        raw = self.client.get_external(
-            _announcements_base_url(self.cfg),
+        raw = self.client.get(
             f"/v1/announcement/{int(announcement_id)}",
             params=params,
             timeout=30,
+            base_url=_announcements_base_url(self.cfg),
         )
         return _format_announcement_detail(raw)
 
@@ -381,29 +381,20 @@ class PoliedroService:
         params = _common_calendar_params(self.cfg)
         return self.client.get("/pmais/api/v1/event/next-events", params=params)
 
-    def get_week_events(self, date: str | None = None) -> Any:
-        selected_date = _parse_date(date, self.cfg["calendar"]["time_zone"])
+    def _range_events(self, path: str, date: str | None, fmt) -> Any:
+        selected = _parse_date(date, self.cfg["calendar"]["time_zone"])
         params = _common_calendar_params(self.cfg)
         params.update({
-            "selectedDate": _js_week_date(selected_date),
+            "selectedDate": fmt(selected),
             "isWidget": str(self.cfg["calendar"]["is_widget"]).lower(),
         })
-        return self.client.get("/pmais/api/v1/event/week-events", params=params)
+        return self.client.get(path, params=params)
+
+    def get_week_events(self, date: str | None = None) -> Any:
+        return self._range_events("/pmais/api/v1/event/week-events", date, _js_week_date)
 
     def get_month_events(self, date: str | None = None) -> Any:
-        selected_date = _parse_date(date, self.cfg["calendar"]["time_zone"])
-        params = _common_calendar_params(self.cfg)
-        params.update({
-            "selectedDate": _js_month_date(selected_date),
-            "isWidget": str(self.cfg["calendar"]["is_widget"]).lower(),
-        })
-        return self.client.get("/pmais/api/v1/event/month-events", params=params)
+        return self._range_events("/pmais/api/v1/event/month-events", date, _js_month_date)
 
     def get_year_events(self, date: str | None = None) -> Any:
-        selected_date = _parse_date(date, self.cfg["calendar"]["time_zone"])
-        params = _common_calendar_params(self.cfg)
-        params.update({
-            "selectedDate": _js_year_date(selected_date),
-            "isWidget": str(self.cfg["calendar"]["is_widget"]).lower(),
-        })
-        return self.client.get("/pmais/api/v1/event/year-events", params=params)
+        return self._range_events("/pmais/api/v1/event/year-events", date, _js_year_date)

@@ -6,24 +6,21 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from mcp.server.transport_security import TransportSecuritySettings
 from mcp.server.auth.handlers.metadata import MetadataHandler, ProtectedResourceMetadataHandler
 from mcp.server.auth.routes import build_metadata
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
-from mcp.shared.auth import ProtectedResourceMetadata
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+from mcp.shared.auth import ProtectedResourceMetadata
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.responses import Response as StarletteResponse
 
 from .api_base import DEFAULT_API_BASE_URL, api_base_url, configured_api_base_url
-from .auth import LoginError, login_with_password
 from .logger import logger
 from .mcp_auth_provider import get_mcp_auth_provider
 from .mcp_tools import register_tools
-from .oauth_proxy import GITHUB_REPO_URL, _login_html, mint_choice_token, resolve_form_tokens
-from .profile_discovery import ProfileChoiceRequired, discover_profile_config
-from .user_context import get_base_config
+from .oauth_proxy import GITHUB_REPO_URL, _login_html, authenticate_and_select_profile
 
 router = APIRouter(tags=["mcp"], include_in_schema=False)
 
@@ -41,15 +38,6 @@ class _MCPSubAppResponse(StarletteResponse):
 
     async def __call__(self, scope, receive, send) -> None:
         await self._app(self._scope, receive, send)
-
-
-def _parse_optional_int(value: str | None) -> int | None:
-    if not value or not value.strip():
-        return None
-    try:
-        return int(value.strip())
-    except ValueError:
-        return None
 
 
 def _mcp_transport_security() -> TransportSecuritySettings:
@@ -189,9 +177,7 @@ def mcp_login_get(pending: str = Query(...)) -> HTMLResponse:
     if provider.get_pending(pending) is None:
         raise HTTPException(status_code=400, detail="Sessão de login inválida ou expirada.")
 
-    return HTMLResponse(
-        _mcp_login_html(pending=pending),
-    )
+    return HTMLResponse(_mcp_login_html(pending=pending))
 
 
 @router.post("/mcp/login", response_model=None)
@@ -207,94 +193,37 @@ def mcp_login_post(
     if provider.get_pending(pending) is None:
         raise HTTPException(status_code=400, detail="Sessão de login inválida ou expirada.")
 
-    base = get_base_config()
-    base_url = base["base_url"].rstrip("/")
-    parsed_school_id = _parse_optional_int(school_id)
-    parsed_dependent_id = _parse_optional_int(dependent_id)
+    def page(**kwargs: Any) -> str:
+        return _mcp_login_html(pending=pending, **kwargs)
 
-    try:
-        tokens, resolved_username, choice_school_id, choice_dependent_id = resolve_form_tokens(
-            base_url=base_url,
-            username=username,
-            password=password,
-            login_choice=login_choice,
-        )
-    except LoginError as exc:
-        logger.warning("MCP OAuth: login P+ falhou para usuário %s: %s", username.strip(), exc)
-        return HTMLResponse(
-            _mcp_login_html(pending=pending, error=str(exc), username=username.strip()),
-            status_code=401,
-        )
-
-    if parsed_school_id is None:
-        parsed_school_id = choice_school_id
-    if parsed_dependent_id is None:
-        parsed_dependent_id = choice_dependent_id
-
-    access_token = tokens["access_token"]
-
-    try:
-        discovered = discover_profile_config(
-            base_url,
-            access_token,
-            interactive=False,
-            school_id=parsed_school_id,
-            dependent_id=parsed_dependent_id,
-        )
-    except ProfileChoiceRequired as exc:
-        try:
-            retry_token = mint_choice_token(
-                tokens,
-                resolved_username,
-                school_id=parsed_school_id,
-                dependent_id=parsed_dependent_id,
-            )
-        except RuntimeError:
-            retry_token = None
-        return HTMLResponse(
-            _mcp_login_html(
-                pending=pending,
-                username=resolved_username,
-                login_choice=retry_token,
-                choice_error={"tipo": exc.choice_type, "opcoes": exc.options},
-                locked_school_id=parsed_school_id if exc.choice_type != "escola" else None,
-                locked_dependent_id=parsed_dependent_id if exc.choice_type != "dependente" else None,
-            ),
-            status_code=409,
-        )
-    except Exception as exc:
-        return HTMLResponse(
-            _mcp_login_html(
-                pending=pending,
-                username=resolved_username,
-                error=f"Não foi possível carregar o perfil: {exc}",
-            ),
-            status_code=400,
-        )
-
-    selected_school_id = int(discovered["student"]["school_id"])
-    selected_dependent_id = discovered["student"].get("dependent_id")
-    if selected_dependent_id is not None:
-        selected_dependent_id = int(selected_dependent_id)
+    result = authenticate_and_select_profile(
+        username=username,
+        password=password,
+        login_choice=login_choice,
+        school_id=school_id,
+        dependent_id=dependent_id,
+        page=page,
+        expires_fallback=3600,
+    )
+    if isinstance(result, HTMLResponse):
+        return result
 
     try:
         redirect_url = provider.complete_login(
             pending,
-            poliedro_access_token=access_token,
-            poliedro_refresh_token=tokens.get("refresh_token"),
-            expires_in=int(tokens.get("expires_in") or 3600),
-            school_id=selected_school_id,
-            dependent_id=selected_dependent_id,
+            poliedro_access_token=result.access_token,
+            poliedro_refresh_token=result.refresh_token,
+            expires_in=result.expires_in,
+            school_id=result.school_id,
+            dependent_id=result.dependent_id,
         )
     except ValueError as exc:
-        return HTMLResponse(
-            _mcp_login_html(pending=pending, error=str(exc), username=resolved_username),
-            status_code=400,
-        )
+        return HTMLResponse(page(error=str(exc), username=result.username), status_code=400)
+
     logger.info(
         "MCP OAuth: perfil selecionado school_id=%s dependent_id=%s",
-        selected_school_id,
-        selected_dependent_id,
+        result.school_id,
+        result.dependent_id,
     )
     return RedirectResponse(redirect_url, status_code=302)
 
@@ -319,145 +248,3 @@ def _mcp_login_html(
         locked_school_id=locked_school_id,
         locked_dependent_id=locked_dependent_id,
     )
-
-
-def create_stdio_server() -> FastMCP:
-    """MCP local (stdio) sem OAuth — usa config/Keychain."""
-    mcp = FastMCP(
-        name="poliedro-mcp",
-        instructions="Consulta notas, mensagens e calendário do Poliedro P+.",
-    )
-
-    from .user_context import get_service
-
-    @mcp.tool()
-    def poliedro_health_check(
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> dict[str, Any]:
-        return get_service(poliedro_token, school_id=school_id, dependent_id=dependent_id).health_check()
-
-    # Re-register stdio tools with optional poliedro_token via wrapper
-    _register_stdio_tools(mcp)
-    return mcp
-
-
-def _register_stdio_tools(mcp: FastMCP) -> None:
-    from .user_context import get_service
-
-    def svc(token=None, school_id=None, dependent_id=None):
-        return get_service(token, school_id=school_id, dependent_id=dependent_id)
-
-    @mcp.tool()
-    def get_grades(
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        return svc(poliedro_token, school_id, dependent_id).get_grades()
-
-    @mcp.tool()
-    def get_simulation_grades(
-        school_year: int | None = None,
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        return svc(poliedro_token, school_id, dependent_id).get_simulation_grades(
-            school_year=school_year
-        )
-
-    @mcp.tool()
-    def list_simulation_assessments(
-        school_year: int | None = None,
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        return svc(poliedro_token, school_id, dependent_id).list_simulation_assessments(
-            school_year=school_year
-        )
-
-    @mcp.tool()
-    def get_simulation_performance(
-        assessment_id: str,
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        """Consulta detalhe do simulado por matéria. Use assessment_id de list_simulation_assessments."""
-        return svc(poliedro_token, school_id, dependent_id).get_simulation_performance(
-            assessment_id
-        )
-
-    @mcp.tool()
-    def get_unread_messages(
-        limit: int = 50,
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        return svc(poliedro_token, school_id, dependent_id).get_messages(
-            status="UNREAD", limit=limit
-        )
-
-    @mcp.tool()
-    def get_messages(
-        status: str = "UNREAD",
-        limit: int = 50,
-        page: int = 1,
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        return svc(poliedro_token, school_id, dependent_id).get_messages(
-            status=status, limit=limit, page=page
-        )
-
-    @mcp.tool()
-    def get_message_detail(
-        announcement_id: int,
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        """Consulta conteúdo completo de um comunicado. Use announcement_id de get_messages."""
-        return svc(poliedro_token, school_id, dependent_id).get_message_detail(
-            announcement_id
-        )
-
-    @mcp.tool()
-    def get_next_events(
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        return svc(poliedro_token, school_id, dependent_id).get_next_events()
-
-    @mcp.tool()
-    def get_week_events(
-        date: str | None = None,
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        return svc(poliedro_token, school_id, dependent_id).get_week_events(date=date)
-
-    @mcp.tool()
-    def get_month_events(
-        date: str | None = None,
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        return svc(poliedro_token, school_id, dependent_id).get_month_events(date=date)
-
-    @mcp.tool()
-    def get_year_events(
-        date: str | None = None,
-        poliedro_token: str | None = None,
-        school_id: int | None = None,
-        dependent_id: int | None = None,
-    ) -> Any:
-        return svc(poliedro_token, school_id, dependent_id).get_year_events(date=date)

@@ -23,20 +23,18 @@ from .api_base import api_base_url
 from .logger import logger
 from .mcp_oauth_tokens import (
     AUTH_CODE_TTL,
-    MAX_AUTH_CODE_URL_LEN,
     extract_poliedro_access_token,
-    mint_auth_code_token,
     mint_client_id,
     mint_pending_token,
     mint_session_access_token,
     verify_payload,
 )
+from .profile_discovery import decode_jwt_claims
 
 CLAUDE_REDIRECT_URIS = (
     "https://claude.ai/api/mcp/auth_callback",
     "https://claude.com/api/mcp/auth_callback",
 )
-from .profile_discovery import decode_jwt_claims
 
 ACCESS_TOKEN_TTL = 3600
 DEFAULT_SCOPES = ["openid", "profile", "email"]
@@ -76,13 +74,6 @@ class PoliedroMcpAuthProvider(
         self._refresh: dict[str, _RefreshEntry] = {}
         self._access: dict[str, AccessToken] = {}
         self._codes: dict[str, tuple[float, _CodePayload]] = {}
-        self._used_code_jtis: dict[str, float] = {}
-
-    def _purge_used_jtis(self) -> None:
-        now = time.time()
-        expired = [key for key, seen_at in self._used_code_jtis.items() if now - seen_at > AUTH_CODE_TTL]
-        for key in expired:
-            self._used_code_jtis.pop(key, None)
 
     def _purge_expired_codes(self) -> None:
         now = time.time()
@@ -153,46 +144,7 @@ class PoliedroMcpAuthProvider(
     def _load_code_payload(self, authorization_code: str) -> _CodePayload | None:
         self._purge_expired_codes()
         entry = self._codes.get(authorization_code)
-        if entry is not None:
-            created_at, payload = entry
-            if time.time() - created_at > AUTH_CODE_TTL:
-                self._codes.pop(authorization_code, None)
-                return None
-            return payload
-
-        try:
-            data = verify_payload(authorization_code, "mcp_code")
-        except Exception:
-            return None
-
-        jti = str(data.get("jti") or "")
-        if not jti:
-            return None
-        self._purge_used_jtis()
-        if jti in self._used_code_jtis:
-            return None
-
-        client = self._restore_client(str(data.get("client_id") or ""))
-        if client is None:
-            return None
-
-        params = AuthorizationParams(
-            state=None,
-            scopes=data.get("scopes") or DEFAULT_SCOPES,
-            code_challenge=data["code_challenge"],
-            redirect_uri=AnyUrl(data["redirect_uri"]),
-            redirect_uri_provided_explicitly=bool(data.get("redirect_uri_provided_explicitly")),
-            resource=data.get("resource"),
-        )
-        return self._build_code_payload(
-            code=authorization_code,
-            client=client,
-            params=params,
-            poliedro_access_token=str(data.get("poliedro_access_token") or ""),
-            poliedro_refresh_token=data.get("poliedro_refresh_token"),
-            expires_in=int(data.get("expires_in") or ACCESS_TOKEN_TTL),
-            expires_at=float(data.get("exp") or time.time()),
-        )
+        return entry[1] if entry else None
 
     def _resolve_poliedro_access_token(self, payload: _CodePayload) -> str:
         if payload.poliedro_access_token:

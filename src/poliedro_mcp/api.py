@@ -126,6 +126,13 @@ def _service_for(ctx: UserContext):
     )
 
 
+def _run(ctx: UserContext, call):
+    try:
+        return call(_service_for(ctx))
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
 def _handle_service_error(exc: Exception) -> JSONResponse:
     logger.exception("Erro ao executar operação Poliedro")
 
@@ -377,10 +384,7 @@ def poliedro_health(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> dict[str, Any]:
     """Verifica se a API está configurada e consegue acessar o Poliedro."""
-    try:
-        return _service_for(ctx).health_check()
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.health_check())
 
 
 @app.get(f"{API_PREFIX}/grades", tags=["poliedro"])
@@ -389,10 +393,7 @@ def get_grades(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta o boletim/notas do aluno no portal Poliedro/P+."""
-    try:
-        return _service_for(ctx).get_grades()
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.get_grades())
 
 
 @app.get(f"{API_PREFIX}/assessments/simulation/list", tags=["poliedro"])
@@ -402,10 +403,7 @@ def list_simulation_assessments(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Lista simulados com assessment_id (UUID) para usar no endpoint de detalhe."""
-    try:
-        return _service_for(ctx).list_simulation_assessments(school_year=school_year)
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.list_simulation_assessments(school_year=school_year))
 
 
 @app.get(
@@ -424,13 +422,10 @@ def get_simulation_performance(
     Fluxo: chame GET /assessments/simulation/list, copie assessment_id do simulado
     desejado e use neste path (não use índice nem nome).
     """
-    try:
-        return _service_for(ctx).get_simulation_performance(
-            assessment_id,
-            compare_with=compare_with,
-        )
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(
+        ctx,
+        lambda svc: svc.get_simulation_performance(assessment_id, compare_with=compare_with),
+    )
 
 
 @app.get(
@@ -448,13 +443,10 @@ def get_simulation_performance_legacy(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Compatibilidade com clientes que usam query param assessment_id."""
-    try:
-        return _service_for(ctx).get_simulation_performance(
-            assessment_id,
-            compare_with=compare_with,
-        )
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(
+        ctx,
+        lambda svc: svc.get_simulation_performance(assessment_id, compare_with=compare_with),
+    )
 
 
 @app.get(f"{API_PREFIX}/assessments/simulation", tags=["poliedro"])
@@ -469,10 +461,7 @@ def get_simulation_grades(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta notas do simulado / prova trimestral do Poliedro/P+."""
-    try:
-        return _service_for(ctx).get_simulation_grades(school_year=school_year)
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.get_simulation_grades(school_year=school_year))
 
 
 @app.get(f"{API_PREFIX}/messages", tags=["poliedro"])
@@ -488,12 +477,10 @@ def get_messages(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta mensagens/notificações do portal Poliedro/P+."""
-    try:
-        return _service_for(ctx).get_messages(
-            status=status_filter, limit=limit, page=page
-        )
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(
+        ctx,
+        lambda svc: svc.get_messages(status=status_filter, limit=limit, page=page),
+    )
 
 
 @app.get(f"{API_PREFIX}/messages/unread", tags=["poliedro"])
@@ -503,10 +490,7 @@ def get_unread_messages(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta mensagens/notificações não lidas do portal Poliedro/P+."""
-    try:
-        return _service_for(ctx).get_messages(status="UNREAD", limit=limit)
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.get_messages(status="UNREAD", limit=limit))
 
 
 @app.get(f"{API_PREFIX}/messages/{{announcement_id}}", tags=["poliedro"])
@@ -520,10 +504,7 @@ def get_message_detail(
 
     Use o announcement_id retornado por GET /messages (campo announcement_id).
     """
-    try:
-        return _service_for(ctx).get_message_detail(announcement_id)
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.get_message_detail(announcement_id))
 
 
 @app.get(f"{API_PREFIX}/calendar/next", tags=["poliedro"])
@@ -532,10 +513,7 @@ def get_next_events(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta próximos eventos do calendário escolar Poliedro/P+."""
-    try:
-        return _service_for(ctx).get_next_events()
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.get_next_events())
 
 
 @app.get(f"{API_PREFIX}/calendar/week", tags=["poliedro"])
@@ -549,10 +527,7 @@ def get_week_events(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta eventos da semana. Se date omitido, usa a data atual."""
-    try:
-        return _service_for(ctx).get_week_events(date=date)
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.get_week_events(date=date))
 
 
 @app.get(f"{API_PREFIX}/calendar/month", tags=["poliedro"])
@@ -566,10 +541,7 @@ def get_month_events(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta eventos do mês. Se date omitido, usa a data atual."""
-    try:
-        return _service_for(ctx).get_month_events(date=date)
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.get_month_events(date=date))
 
 
 @app.get(f"{API_PREFIX}/calendar/year", tags=["poliedro"])
@@ -583,10 +555,7 @@ def get_year_events(
     ctx: UserContext = Depends(resolve_user_context),
 ) -> Any:
     """Consulta eventos do ano. Se date omitido, usa o ano atual."""
-    try:
-        return _service_for(ctx).get_year_events(date=date)
-    except Exception as exc:
-        return _handle_service_error(exc)
+    return _run(ctx, lambda svc: svc.get_year_events(date=date))
 
 
 def run() -> None:
