@@ -1,155 +1,58 @@
-# Configurar ChatGPT Actions (OAuth multi-usuário)
+# Configurar o ChatGPT (plugin MCP)
 
-Este guia conecta um **Custom GPT** à API no Render com **login por usuário** — cada pessoa entra com sua conta do P+.
+O ChatGPT consulta o P+ pelo mesmo MCP do Claude. O plugin não usa Actions, `openapi.json` nem Client ID/Secret.
 
 ## Pré-requisitos
 
-1. API publicada no Render (veja README)
-2. Variáveis no Render:
+1. API publicada no Render
+2. No Render: `OAUTH_CLIENT_SECRET` e `API_BASE_URL=https://poliedro-api.iden.is`
 
-| Variável | Obrigatória | Exemplo |
-|----------|-------------|---------|
-| `OAUTH_CLIENT_SECRET` | Sim | gere com `openssl rand -hex 32` |
-| `OAUTH_CLIENT_ID` | Não | padrão: `poliedro-gpt` |
-| `API_BASE_URL` | Recomendado | `https://poliedro-api.iden.is` |
+`OAUTH_CLIENT_SECRET` fica só no servidor. Não cole esse valor no ChatGPT.
 
-Não é necessário `POLIEDRO_TOKEN` nem `POLIEDRO_CONFIG_JSON` no modo OAuth.
+## Conectar
 
-## Passo 1 — Deploy
+1. ChatGPT → **Settings → Security and login** → ligue **Developer mode**
+2. **Plugins → +**
+3. URL:
 
-Após o deploy, gere os valores OAuth:
-
-```bash
-# Na raiz do repo (poliedro-GPT/, não dentro de scripts/)
-python print_oauth_config.py https://poliedro-api.iden.is
+```
+https://poliedro-api.iden.is/mcp
 ```
 
-Com o secret local (ex.: exportado do Render):
+4. Crie a conexão e faça login com usuário e senha do [pmais.p4ed.com](https://pmais.p4ed.com/) (usuário sem `@p4ed.com`)
+5. Se a conta tiver várias escolas ou dependentes, escolha na tela de login
 
-```bash
-OAUTH_CLIENT_SECRET=seu-secret python print_oauth_config.py https://poliedro-api.iden.is
-```
-
-Confira também:
+Confirme que a API responde:
 
 ```bash
 curl -s https://poliedro-api.iden.is/health
+curl -s https://poliedro-api.iden.is/.well-known/oauth-authorization-server/mcp
 ```
 
-## Passo 2 — Criar o Custom GPT
+O JSON do segundo comando precisa trazer `registration_endpoint`.
 
-1. Abra [ChatGPT → Explore GPTs → Create](https://chatgpt.com/gpts/editor)
-2. Em **Actions → Create new action**
-3. **Schema → Import from URL:**
+## Migrar um Custom GPT
 
-```
-https://poliedro-api.iden.is/openapi.json
-```
+*Migrate to plugin* copia instruções e arquivos de conhecimento. Três coisas não vêm:
 
-4. Em **Authentication**, escolha **OAuth** e preencha:
+- **Actions** (OpenAPI + OAuth manual). O aviso *Unsupported actions* é esperado. Sem conectar `/mcp`, o plugin não consulta o P+.
+- Conversas antigas
+- Compartilhamento público. O plugin fica privado, e o GPT original deixa de ser editável
 
-| Campo | Valor |
-|-------|--------|
-| Client ID | `poliedro-gpt` (ou seu `OAUTH_CLIENT_ID`) |
-| Client Secret | mesmo valor de `OAUTH_CLIENT_SECRET` no Render |
-| Authorization URL | `https://poliedro-api.iden.is/oauth/authorize` |
-| Token URL | `https://poliedro-api.iden.is/oauth/token` |
-| Scope | `openid profile email` — **não** use seu e-mail aqui |
-| Token Exchange Method | Default (POST request) |
+## Ferramentas
 
-5. **Salve o GPT** e copie o **Callback URL** que aparece em Actions (formato `https://chatgpt.com/aip/g-.../oauth/callback`).
+| Tool | Descrição |
+|------|-----------|
+| `get_grades` | Boletim / notas |
+| `get_simulation_grades` | Simulado — resumo |
+| `list_simulation_assessments` | Simulado — listagem com `assessment_id` |
+| `get_simulation_performance` | Simulado — detalhe por matéria |
+| `get_messages` / `get_unread_messages` | Mensagens |
+| `get_message_detail` | Texto completo (`announcement_id` de `get_messages`) |
+| `get_next_events` | Próximos eventos |
+| `get_week_events` / `get_month_events` / `get_year_events` | Calendário |
+| `poliedro_health_check` | Status da conexão |
 
-6. Para **publicar** o GPT na loja, preencha a **Privacy policy URL**:
+## Actions (GPT antigo)
 
-```
-https://poliedro-api.iden.is/privacy
-```
-
-Texto completo também em [docs/privacy-policy.md](privacy-policy.md) e no GitHub.
-
-O callback do ChatGPT já é aceito por padrão. Só altere `OAUTH_ALLOWED_REDIRECT_PREFIXES` se usar outro domínio.
-
-## Passo 3 — Instruções do GPT
-
-```
-Você ajuda pais e alunos a consultar o portal Poliedro/P+.
-Antes de buscar notas, mensagens ou calendário, o usuário deve estar logado.
-Se não estiver, peça para clicar em "Sign in" / "Entrar" — nunca peça senha no chat.
-Use as Actions para consultar a API e resuma os dados em português claro.
-Para simulados trimestrais: (1) chame GET /assessments/simulation/list;
-(2) use o assessment_id retornado em GET /assessments/simulation/{assessment_id}/performance.
-Nunca invente UUID nem use índice ordinal no lugar do assessment_id.
-Para mensagens/comunicados: (1) chame GET /messages;
-(2) use o announcement_id retornado em GET /messages/{announcement_id} para o texto completo.
-Se retornar 409 com escolha_necessaria, peça school_id ou dependent_id e tente de novo.
-Se retornar 401, peça para fazer login novamente (Sign in).
-```
-
-## Fluxo do usuário final
-
-1. Abre o GPT no ChatGPT
-2. Clica em **"Sign in to …"** (botão OAuth)
-3. Vê a tela de login P+ hospedada na sua API
-4. Digita usuário e senha do https://pmais.p4ed.com/
-5. Volta ao ChatGPT autenticado
-6. Pode pedir notas, mensagens e calendário
-
-## Endpoints da API
-
-| Método | Caminho | Descrição |
-|--------|---------|-----------|
-| GET | `/oauth/authorize` | Tela de login (ChatGPT redireciona aqui) |
-| POST | `/oauth/token` | Troca code por token |
-| GET | `/api/v1/health` | Status |
-| GET | `/api/v1/grades` | Boletim / notas |
-| GET | `/api/v1/assessments/simulation` | Simulado — resumo |
-| GET | `/api/v1/assessments/simulation/list` | Simulado — listagem com `assessment_id` |
-| GET | `/api/v1/assessments/simulation/{assessment_id}/performance` | Simulado — detalhe por matéria |
-| GET | `/api/v1/messages` | Mensagens — listagem com preview |
-| GET | `/api/v1/messages/unread` | Não lidas |
-| GET | `/api/v1/messages/{announcement_id}` | Mensagem — conteúdo completo |
-| GET | `/api/v1/calendar/next` | Próximos eventos |
-| GET | `/api/v1/calendar/week` | Semana |
-| GET | `/api/v1/calendar/month` | Mês |
-| GET | `/api/v1/calendar/year` | Ano |
-
-## Contas com múltiplas escolas ou dependentes
-
-Se o login falhar pedindo escolha, o formulário lista as opções. O usuário informa o ID no campo **ID da escola** ou **ID do dependente** e tenta de novo.
-
-Nas Actions, também é possível passar `school_id` ou `dependent_id` como query param após o login.
-
-## Modo legado (um usuário fixo)
-
-Se preferir um único usuário sem OAuth:
-
-1. Authentication → **API Key** → header `X-API-Key`
-2. Configure `POLIEDRO_TOKEN` + `POLIEDRO_CONFIG_JSON` no Render
-
-Veja README, seção "Modo single-user".
-
-## Testar OAuth manualmente
-
-```bash
-# Simular abertura da tela de login (abra a URL no navegador)
-open "https://poliedro-api.iden.is/oauth/authorize?client_id=poliedro-gpt&response_type=code&redirect_uri=https%3A%2F%2Fchatgpt.com%2Faip%2Fg-test%2Foauth%2Fcallback&state=xyz&scope=openid%20profile%20email"
-```
-
-Após login, troque o `code` retornado:
-
-```bash
-curl -s -X POST https://poliedro-api.iden.is/oauth/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=authorization_code" \
-  -d "client_id=poliedro-gpt" \
-  -d "client_secret=SEU_OAUTH_CLIENT_SECRET" \
-  -d "code=CODE_RETORNADO" \
-  -d "redirect_uri=https://chatgpt.com/aip/g-test/oauth/callback"
-```
-
-Use o `access_token` nas chamadas:
-
-```bash
-curl -s https://poliedro-api.iden.is/api/v1/grades \
-  -H "Authorization: Bearer TOKEN"
-```
+A API REST em `/api/v1/*` e o OAuth em `/oauth/authorize` continuam no ar enquanto um Custom GPT ainda não migrado precisar deles. O plugin novo não usa esse fluxo. Client ID padrão: `poliedro-gpt`.

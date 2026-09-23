@@ -92,9 +92,15 @@ def check_tools() -> None:
     local_props = _props(create_local_server())
     assert remote_props == REMOTE_PROPS, remote_props
     assert local_props == {name: props | {"poliedro_token"} for name, props in REMOTE_PROPS.items()}
-    remote_required = _required(create_mcp_server())
-    for name in REMOTE_PROPS:
-        assert remote_required[name] == REQUIRED.get(name)
+    remote = create_mcp_server()
+    remote_required = _required(remote)
+    for tool in remote._tool_manager.list_tools():
+        assert remote_required[tool.name] == REQUIRED.get(tool.name)
+        ann = tool.annotations
+        assert ann is not None
+        assert ann.readOnlyHint is True
+        assert ann.openWorldHint is False
+        assert ann.destructiveHint is False
 
 
 def check_http() -> None:

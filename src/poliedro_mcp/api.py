@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -327,6 +327,33 @@ def root() -> dict[str, str]:
 def privacy_policy() -> HTMLResponse:
     """Política de privacidade pública (exigida para publicar Custom GPT no ChatGPT)."""
     return HTMLResponse(privacy_policy_html())
+
+
+@app.get("/terms", tags=["meta"], response_class=HTMLResponse, include_in_schema=False)
+def terms() -> HTMLResponse:
+    """Termos curtos para a ficha do plugin no ChatGPT."""
+    return HTMLResponse(
+        """<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Termos — Poliedro P+</title></head>
+<body>
+<h1>Termos de uso</h1>
+<p>Serviço não oficial. Não é afiliado ao Poliedro Sistema de Ensino.</p>
+<p>A senha do P+ é usada só para autenticar no portal e não é armazenada.
+Cada pessoa acessa apenas os próprios dados, em leitura.</p>
+<p>O uso do portal P+ continua sujeito aos termos do Poliedro.
+Este serviço é oferecido sem garantia.</p>
+<p><a href="/privacy">Política de privacidade</a></p>
+</body></html>"""
+    )
+
+
+@app.api_route("/.well-known/openai-apps-challenge", methods=["GET", "HEAD"], include_in_schema=False)
+def openai_apps_challenge() -> PlainTextResponse:
+    """Token de verificação de domínio do portal de plugins. Só o texto, sem JSON."""
+    token = os.getenv("OPENAI_APPS_CHALLENGE", "").strip()
+    if not token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Desafio não configurado.")
+    return PlainTextResponse(token)
 
 
 @app.api_route("/health", methods=["GET", "HEAD"], tags=["meta"])

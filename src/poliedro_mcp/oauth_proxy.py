@@ -271,31 +271,42 @@ def _login_html(
         error_block += _choice_options_html(choice_error)
 
     authenticated = bool(login_choice)
+    show_password = bool(error or username or choice_error or authenticated)
     credentials_block = ""
     if authenticated:
         credentials_block = (
             f'<input type="hidden" name="username" value="{html.escape(username)}">'
             f'<p class="hint">Conta autenticada: <strong>{html.escape(username)}</strong>. '
-            "Escolha a opção abaixo — não é preciso informar a senha de novo.</p>"
+            "Escolha a opção abaixo.</p>"
         )
     else:
         credentials_block = f"""
-      <label for="username">Usuário</label>
+      <label for="username">Login ou e-mail @p4ed</label>
       <input id="username" name="username" autocomplete="username" required
+             placeholder="Digite seu login ou e-mail @p4ed"
              value="{html.escape(username)}">
-      <label for="password">Senha</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <div id="step-pass" {"hidden" if not show_password else ""}>
+        <label for="password">Senha</label>
+        <input id="password" name="password" type="password" autocomplete="current-password"
+               placeholder="Digite sua senha" {"required" if show_password else ""}>
+      </div>
 """
 
     show_manual_ids = choice_error is None and not authenticated
     manual_ids = ""
     if show_manual_ids:
         manual_ids = """
-      <label for="school_id">ID da escola (opcional)</label>
-      <input id="school_id" name="school_id" inputmode="numeric" placeholder="Somente se solicitado">
-      <label for="dependent_id">ID do dependente (opcional)</label>
-      <input id="dependent_id" name="dependent_id" inputmode="numeric" placeholder="Contas de responsável">
+      <details class="more">
+        <summary>Escola ou dependente</summary>
+        <label for="school_id">ID da escola (opcional)</label>
+        <input id="school_id" name="school_id" inputmode="numeric" placeholder="Somente se solicitado">
+        <label for="dependent_id">ID do dependente (opcional)</label>
+        <input id="dependent_id" name="dependent_id" inputmode="numeric" placeholder="Contas de responsável">
+      </details>
 """
+
+    button = "Avançar"
+    button_type = "submit" if show_password or authenticated else "button"
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -304,49 +315,61 @@ def _login_html(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Entrar no Poliedro P+</title>
   <style>
-    body {{ font-family: system-ui, sans-serif; background: #f4f6f8; margin: 0; }}
-    main {{ max-width: 420px; margin: 48px auto; background: #fff; padding: 28px; border-radius: 12px;
-             box-shadow: 0 8px 24px rgba(0,0,0,.08); }}
-    h1 {{ font-size: 1.25rem; margin: 0 0 8px; }}
-    p {{ color: #555; margin: 0 0 20px; line-height: 1.4; }}
-    label {{ display: block; font-size: .9rem; margin-bottom: 6px; color: #333; }}
-    input {{ width: 100%; box-sizing: border-box; padding: 10px 12px; margin-bottom: 14px;
-             border: 1px solid #ccd3db; border-radius: 8px; font-size: 1rem; }}
-    button {{ width: 100%; padding: 12px; border: 0; border-radius: 8px; background: #1a5fb4;
-              color: #fff; font-size: 1rem; cursor: pointer; }}
-    .error {{ color: #b00020; }}
-    .hint {{ font-size: .85rem; color: #666; }}
-    .notice {{ font-size: .85rem; color: #333; background: #eef4fc; border: 1px solid #c5d9f0;
-               border-radius: 8px; padding: 12px 14px; margin-bottom: 20px; line-height: 1.45; }}
-    .notice strong {{ color: #1a5fb4; }}
-    footer {{ max-width: 420px; margin: 16px auto 48px; text-align: center; font-size: .8rem; color: #666; }}
-    footer a {{ color: #1a5fb4; }}
-    fieldset.choices {{ border: 1px solid #c5d9f0; border-radius: 8px; margin: 0 0 16px; padding: 10px 12px; }}
-    fieldset.choices legend {{ color: #1a5fb4; font-weight: 600; }}
-    label.choice {{ display: flex; gap: 10px; align-items: flex-start; margin: 8px 0; font-size: .95rem; }}
-    label.choice input {{ width: auto; margin: 4px 0 0; }}
+    body {{ font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #fff;
+            color: #1c1c1c; margin: 0; }}
+    main {{ max-width: 420px; margin: 12vh auto 0; padding: 0 24px 32px; }}
+    .logo {{ display: block; width: 72px; height: 72px; margin: 0 auto 28px; border-radius: 16px; }}
+    label {{ display: block; font-size: 1rem; margin: 0 0 10px; }}
+    input {{ width: 100%; box-sizing: border-box; padding: 14px 18px; margin-bottom: 22px;
+             border: 1px solid #d5d8de; border-radius: 999px; font-size: 1rem; background: #fff; }}
+    input:focus {{ outline: 2px solid #cfe3ff; border-color: #0072ef; }}
+    button {{ width: 100%; padding: 14px 18px; border: 0; border-radius: 999px; background: #0072ef;
+              color: #fff; font-size: 1.05rem; font-weight: 600; cursor: pointer; }}
+    button:hover {{ background: #0064d6; }}
+    .error {{ color: #b00020; margin: 0 0 16px; }}
+    .hint {{ font-size: .9rem; color: #555; margin: 0 0 16px; }}
+    .notice {{ font-size: .8rem; color: #666; margin: 18px 0 0; line-height: 1.45; }}
+    .notice a {{ color: #0072ef; }}
+    details.more {{ margin: -6px 0 18px; color: #555; font-size: .9rem; }}
+    details.more summary {{ cursor: pointer; margin-bottom: 12px; }}
+    fieldset.choices {{ border: 1px solid #d5d8de; border-radius: 16px; margin: 0 0 18px; padding: 8px 14px 12px; }}
+    fieldset.choices legend {{ padding: 0 6px; }}
+    label.choice {{ display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; font-size: .95rem; }}
+    label.choice input {{ width: auto; margin: 3px 0 0; border-radius: 4px; }}
+    [hidden] {{ display: none !important; }}
   </style>
 </head>
 <body>
   <main>
-    <h1>Poliedro P+</h1>
-    <p>Use o mesmo usuário e senha do portal <strong>pmais.p4ed.com</strong>.</p>
-    <div class="notice" role="note">
-      <strong>Privacidade:</strong> suas credenciais são usadas apenas para autenticar
-      diretamente nos servidores do Poliedro (P+). Elas <strong>não são armazenadas</strong>
-      neste serviço — nem em disco, banco de dados ou logs — em hipótese alguma.
-      <a href="/privacy">Política de privacidade</a>
-    </div>
-    {error_block}
+    <img class="logo" src="https://www.iden.is/assets/pmais.png" alt="P+">
     <form method="post" action="{html.escape(form_action)}">
       {oauth_hidden}
+      {error_block}
       {credentials_block}
       {manual_ids}
-      <p class="hint">Usuário sem @p4ed.com.</p>
-      <button type="submit">Entrar</button>
+      <button id="go" type="{button_type}">{button}</button>
+      <p class="notice">
+        Use o login do <strong>pmais.p4ed.com</strong>, sem @p4ed.com.
+        A senha autentica direto no Poliedro e <strong>não fica armazenada</strong> aqui.
+        <a href="/privacy">Privacidade</a>
+      </p>
     </form>
   </main>
-  <footer>Projeto open source não oficial </footer>
+  <script>
+    const go = document.getElementById("go");
+    const pass = document.getElementById("step-pass");
+    const user = document.getElementById("username");
+    const password = document.getElementById("password");
+    if (go && pass && user && password && go.type !== "submit") {{
+      go.addEventListener("click", () => {{
+        if (!user.value.trim()) {{ user.reportValidity(); return; }}
+        pass.hidden = false;
+        password.required = true;
+        go.type = "submit";
+        password.focus();
+      }});
+    }}
+  </script>
 </body>
 </html>"""
 

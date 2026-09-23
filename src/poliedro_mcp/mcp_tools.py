@@ -12,6 +12,7 @@ from typing import Any
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from .logger import logger
 from .user_context import get_service
@@ -170,9 +171,18 @@ def _bind(spec: _Spec, *, local: bool):
     return fn
 
 
+# Todas as tools só leem a conta P+ logada. O portal do ChatGPT exige os três hints.
+_READ_ONLY = ToolAnnotations(
+    readOnlyHint=True,
+    openWorldHint=False,
+    destructiveHint=False,
+    idempotentHint=True,
+)
+
+
 def register_tools(mcp: FastMCP, *, local: bool = False) -> None:
     for spec in _TOOLS:
-        mcp.add_tool(_bind(spec, local=local))
+        mcp.add_tool(_bind(spec, local=local), annotations=_READ_ONLY)
 
 
 def create_local_server() -> FastMCP:

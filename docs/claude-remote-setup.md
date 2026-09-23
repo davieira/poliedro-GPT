@@ -44,7 +44,7 @@ Não é preciso informar Client ID, Client Secret nem URLs de token — o MCP us
 
 ## Privacidade
 
-Igual ao ChatGPT OAuth:
+Igual ao plugin do ChatGPT:
 
 - Senha **não** é armazenada — só usada no login e descartada
 - Token JWT do Poliedro fica **em memória** na sessão
@@ -57,7 +57,7 @@ Igual ao ChatGPT OAuth:
 | Onde roda | Seu Mac (`python -m poliedro_mcp.server`) | API no Render |
 | Login | Keychain (`setup_login`) | OAuth na web |
 | Claude | Desktop only | Web + app (Connectors) |
-| ChatGPT | — | REST + OAuth Actions |
+| ChatGPT | — | Plugin MCP (a mesma URL `/mcp`) |
 
 ## Troubleshooting
 
