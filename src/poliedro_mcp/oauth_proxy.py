@@ -318,7 +318,7 @@ def _login_html(
     body {{ font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #fff;
             color: #1c1c1c; margin: 0; }}
     main {{ max-width: 420px; margin: 12vh auto 0; padding: 0 24px 32px; }}
-    .logo {{ display: block; width: 72px; height: 72px; margin: 0 auto 28px; border-radius: 16px; }}
+    .logo {{ display: block; margin: 0 auto 28px; }}
     label {{ display: block; font-size: 1rem; margin: 0 0 10px; }}
     input {{ width: 100%; box-sizing: border-box; padding: 14px 18px; margin-bottom: 22px;
              border: 1px solid #d5d8de; border-radius: 999px; font-size: 1rem; background: #fff; }}
@@ -341,7 +341,7 @@ def _login_html(
 </head>
 <body>
   <main>
-    <img class="logo" src="https://www.iden.is/assets/pmais.png" alt="P+">
+    <svg class="logo" width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="P+"><path d="M16.8408 6H47.1592C53.1417 6 58 10.8583 58 16.8408V47.1592C58 53.1417 53.1417 58 47.1592 58H16.6476C10.7716 58 6 53.2284 6 47.3524V16.8408C6 10.8583 10.8583 6 16.8408 6Z" fill="#0061FF"/><path d="M50.1785 40.7532H46.2562V36.831C46.2562 35.3799 45.1815 34.1096 43.7354 33.9734C42.0764 33.8174 40.6773 35.1224 40.6773 36.7492V40.7532H36.755C35.304 40.7532 34.0337 41.8279 33.8975 43.2715C33.7415 44.9281 35.0465 46.3296 36.6733 46.3296H40.6773V50.2519C40.6773 51.703 41.752 52.9732 43.1956 53.1094C44.8522 53.2654 46.2537 51.9605 46.2537 50.3336V46.3296H50.2577C51.8845 46.3296 53.1895 44.9306 53.0335 43.2715C52.8973 41.8279 51.627 40.7532 50.176 40.7532H50.1785Z" fill="white"/><path d="M25.0674 10.8384H15.6579C13.0604 10.8384 10.9531 12.9456 10.9531 15.5431V48.4765C10.9531 51.0616 13.0505 53.159 15.6356 53.159H15.6802C18.2653 53.159 20.3626 51.0616 20.3626 48.4765V39.0669H25.0674C32.8625 39.0669 39.1817 32.7477 39.1817 24.9527C39.1817 17.1576 32.8625 10.8384 25.0674 10.8384ZM29.7722 24.9527C29.7722 27.5502 27.6649 29.6574 25.0674 29.6574H20.3626V20.2479H25.0674C27.6649 20.2479 29.7722 22.3551 29.7722 24.9527Z" fill="white"/></svg>
     <form method="post" action="{html.escape(form_action)}">
       {oauth_hidden}
       {error_block}
