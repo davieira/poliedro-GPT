@@ -40,6 +40,7 @@ Não é preciso informar Client ID, Client Secret nem URLs de token — o MCP us
 | `get_messages` / `get_unread_messages` | Mensagens |
 | `get_next_events` | Próximos eventos |
 | `get_week_events` / `get_month_events` / `get_year_events` | Calendário |
+| `get_day_agenda` | Agenda do dia e fim da última aula |
 | `poliedro_health_check` | Status da conexão |
 
 ## Privacidade

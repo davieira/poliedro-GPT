@@ -129,6 +129,13 @@ _TOOLS: tuple[_Spec, ...] = (
         (_p("date", str | None),),
         lambda svc, args: svc.get_year_events(date=args.get("date")),
     ),
+    _Spec(
+        "get_day_agenda",
+        "Agenda do dia (aulas e intervalos) e o horário em que termina a última aula. "
+        "date em YYYY-MM-DD; omitido = hoje.",
+        (_p("date", str | None),),
+        lambda svc, args: svc.get_day_agenda(date=args.get("date")),
+    ),
 )
 
 _CONTEXT = (

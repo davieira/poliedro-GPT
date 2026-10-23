@@ -14,6 +14,7 @@ os.environ.setdefault("API_BASE_URL", "https://poliedro-api.iden.is")
 from fastapi.testclient import TestClient
 
 from poliedro_mcp.api import app
+from poliedro_mcp.services import _check_last_class
 from poliedro_mcp.api_base import api_base_url
 from poliedro_mcp.mcp_oauth_tokens import mint_pending_token, mint_session_access_token, parse_session_context
 from poliedro_mcp.mcp_tools import create_local_server
@@ -24,6 +25,7 @@ API_PATHS = {
     "/api/v1/assessments/simulation",
     "/api/v1/assessments/simulation/list",
     "/api/v1/assessments/simulation/{assessment_id}/performance",
+    "/api/v1/calendar/day",
     "/api/v1/calendar/month",
     "/api/v1/calendar/next",
     "/api/v1/calendar/week",
@@ -48,6 +50,7 @@ REMOTE_PROPS = {
     "get_week_events": {"date", "school_id", "dependent_id"},
     "get_month_events": {"date", "school_id", "dependent_id"},
     "get_year_events": {"date", "school_id", "dependent_id"},
+    "get_day_agenda": {"date", "school_id", "dependent_id"},
 }
 REQUIRED = {
     "get_simulation_performance": ["assessment_id"],
@@ -211,6 +214,7 @@ def check_http() -> None:
 
 
 def main() -> None:
+    _check_last_class()
     check_tokens()
     check_tools()
     check_http()

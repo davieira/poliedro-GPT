@@ -585,6 +585,20 @@ def get_year_events(
     return _run(ctx, lambda svc: svc.get_year_events(date=date))
 
 
+@app.get(f"{API_PREFIX}/calendar/day", tags=["poliedro"])
+def get_day_agenda(
+    date: str | None = Query(
+        default=None,
+        description="Dia no formato YYYY-MM-DD. Omitido = hoje.",
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+    ),
+    _: None = Depends(verify_api_access),
+    ctx: UserContext = Depends(resolve_user_context),
+) -> Any:
+    """Agenda do dia e o horário em que termina a última aula."""
+    return _run(ctx, lambda svc: svc.get_day_agenda(date=date))
+
+
 def run() -> None:
     import uvicorn
 

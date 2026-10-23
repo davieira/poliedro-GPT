@@ -89,6 +89,52 @@ def _js_week_date(dt: datetime) -> str:
     return format_datetime(dt.astimezone(ZoneInfo("UTC")), usegmt=True)
 
 
+_CLASS = 10  # aula
+_BREAK = 12  # intervalo
+_KIND = {_CLASS: "aula", _BREAK: "intervalo"}
+
+
+def _hhmm(iso: str | None, tz_name: str) -> str | None:
+    if not iso:
+        return None
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(ZoneInfo(tz_name))
+    return dt.strftime("%H:%M")
+
+
+def _agenda_event(item: dict[str, Any], tz_name: str) -> dict[str, Any]:
+    return {
+        "name": item.get("name"),
+        "start": _hhmm(item.get("startTime"), tz_name),
+        "end": _hhmm(item.get("endTime"), tz_name),
+        "kind": _KIND.get(item.get("typeEventId"), "outro"),
+    }
+
+
+def _last_class(items: list[dict[str, Any]], day: str, tz_name: str) -> dict[str, Any] | None:
+    classes = [
+        item for item in items
+        if item.get("occurrenceDate") == day and item.get("typeEventId") == _CLASS
+    ]
+    if not classes:
+        return None
+    last = max(classes, key=lambda item: item.get("endTime") or "")
+    return {"name": last.get("name"), "end": _hhmm(last.get("endTime"), tz_name)}
+
+
+def _check_last_class() -> None:
+    items = [
+        {"name": "Intervalo", "typeEventId": 12, "occurrenceDate": "2026-10-26",
+         "endTime": "2026-10-26T14:00:00.000Z"},
+        {"name": "LP 2", "typeEventId": 10, "occurrenceDate": "2026-10-26",
+         "endTime": "2026-10-26T15:40:00.000Z"},
+        {"name": "Geografia", "typeEventId": 10, "occurrenceDate": "2026-10-27",
+         "endTime": "2026-10-27T10:50:00.000Z"},
+    ]
+    last = _last_class(items, "2026-10-26", "America/Sao_Paulo")
+    assert last == {"name": "LP 2", "end": "12:40"}
+    assert _last_class(items, "2026-10-23", "America/Sao_Paulo") is None
+
+
 def _parse_date(date_str: str | None, tz_name: str) -> datetime:
     tz = ZoneInfo(tz_name)
     if date_str:
@@ -398,3 +444,32 @@ class PoliedroService:
 
     def get_year_events(self, date: str | None = None) -> Any:
         return self._range_events("/pmais/api/v1/event/year-events", date, _js_year_date)
+
+    def get_day_agenda(self, date: str | None = None) -> dict[str, Any]:
+        """Agenda do dia e o horário em que termina a última aula."""
+        tz = self.cfg["calendar"]["time_zone"]
+        day = _parse_date(date, tz).strftime("%Y-%m-%d")
+        params = _common_calendar_params(self.cfg)
+        params.update({"selectedDate": day, "pageSize": 8})
+        items: list[dict[str, Any]] = []
+        cursor = ""
+        for _ in range(8):  # ponytail: 8 páginas; sobe se um dia passar de 64 eventos
+            if cursor:
+                params["cursor"] = cursor
+            raw = self.client.get("/pmais/api/v1/event/widget-events", params=params)
+            page = raw.get("items") or []
+            items.extend(page)
+            info = raw.get("pageInfo") or {}
+            cursor = info.get("nextCursor") or ""
+            if any((item.get("occurrenceDate") or "") > day for item in page):
+                break
+            if not info.get("hasMore") or not cursor:
+                break
+        day_items = [item for item in items if item.get("occurrenceDate") == day]
+        day_items.sort(key=lambda item: item.get("startTime") or "")
+        return {
+            "date": day,
+            "time_zone": tz,
+            "events": [_agenda_event(item, tz) for item in day_items],
+            "last_class": _last_class(day_items, day, tz),
+        }

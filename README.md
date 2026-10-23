@@ -12,6 +12,7 @@ Servidor MCP **não oficial** para consultar notas, mensagens e calendário do p
 - Simulados / provas trimestrais (resumo, listagem e detalhe por matéria)
 - Mensagens e notificações
 - Calendário escolar (próximos eventos, semana, mês, ano)
+- Agenda do dia: aulas, intervalos e o horário em que termina a última aula
 - **ChatGPT** via plugin MCP
 - **Claude** via MCP remoto (Custom Connector) ou MCP local no Desktop
 
@@ -68,7 +69,19 @@ https://poliedro-api.iden.is/mcp
 
 **Migrar um GPT existente:** o botão *Migrate to plugin* copia instruções e arquivos. As Actions aparecem como *Unsupported actions* e param de funcionar. O plugin fica **privado** (não dá para publicar na loja) e o GPT original deixa de ser editável. Conecte a URL `/mcp` no plugin depois da migração.
 
-**Ferramentas:** `get_grades`, simulados (`get_simulation_grades`, `list_simulation_assessments`, `get_simulation_performance`), `get_messages`, `get_unread_messages`, `get_message_detail`, `get_next_events`, calendário (semana/mês/ano), `poliedro_health_check`.
+**Ferramentas:** `get_grades`, simulados (`get_simulation_grades`, `list_simulation_assessments`, `get_simulation_performance`), `get_messages`, `get_unread_messages`, `get_message_detail`, `get_next_events`, `get_week_events`, `get_month_events`, `get_year_events`, `get_day_agenda`, `poliedro_health_check`.
+
+## Agenda do dia
+
+`get_day_agenda` lê a agenda do widget (`/pmais/api/v1/event/widget-events`). Sem `date`, usa hoje; com data, `YYYY-MM-DD`.
+
+A resposta traz `events` (nome, início, fim e tipo) no fuso `America/Sao_Paulo`. Aula é `typeEventId` 10, intervalo é 12. `last_class.end` é o fim da última aula daquele dia — intervalo não entra nessa conta.
+
+Na API REST: `GET /api/v1/calendar/day?date=2026-10-26`. No CLI local:
+
+```bash
+python -m poliedro_mcp.cli calendar day --date 2026-10-26
+```
 
 ## Claude — MCP remoto
 

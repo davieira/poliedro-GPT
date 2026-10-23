@@ -51,6 +51,7 @@ O JSON do segundo comando precisa trazer `registration_endpoint`.
 | `get_message_detail` | Texto completo (`announcement_id` de `get_messages`) |
 | `get_next_events` | Próximos eventos |
 | `get_week_events` / `get_month_events` / `get_year_events` | Calendário |
+| `get_day_agenda` | Agenda do dia e fim da última aula |
 | `poliedro_health_check` | Status da conexão |
 
 ## Actions (GPT antigo)

@@ -34,7 +34,7 @@ def main() -> None:
     msg_detail.add_argument("--announcement-id", type=int, required=True)
 
     cal = sub.add_parser("calendar")
-    cal.add_argument("mode", choices=["next", "week", "month", "year"])
+    cal.add_argument("mode", choices=["next", "week", "month", "year", "day"])
     cal.add_argument("--date", default=None)
 
     args = parser.parse_args()
@@ -64,6 +64,8 @@ def main() -> None:
             print_json(service.get_month_events(args.date))
         elif args.mode == "year":
             print_json(service.get_year_events(args.date))
+        elif args.mode == "day":
+            print_json(service.get_day_agenda(args.date))
 
 
 if __name__ == "__main__":
